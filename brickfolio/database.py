@@ -48,6 +48,9 @@ class Database:
         self.connection = sqlite3.connect(path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
+        self.connection.execute("PRAGMA trusted_schema = OFF")
+        self.connection.execute("PRAGMA secure_delete = ON")
+        self.connection.execute("PRAGMA busy_timeout = 5000")
         self._create_schema()
 
     def _create_schema(self) -> None:
@@ -215,7 +218,13 @@ class Database:
         with destination.open("w", newline="", encoding="utf-8-sig") as output:
             writer = csv.DictWriter(output, fieldnames=list(columns.values()))
             writer.writeheader()
-            writer.writerows({label: " ".join(str(row[key]).split()) for key, label in columns.items()} for row in rows)
+            writer.writerows(
+                {
+                    label: self._safe_csv_value(" ".join(str(row[key]).split()))
+                    for key, label in columns.items()
+                }
+                for row in rows
+            )
         return len(rows)
 
     @staticmethod
@@ -570,7 +579,20 @@ class Database:
             fieldnames = list(first.keys())
             writer = csv.DictWriter(output, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(dict(row) for row in rows)
+            writer.writerows(
+                {key: Database._safe_csv_value(value) for key, value in dict(row).items()}
+                for row in rows
+            )
+
+    @staticmethod
+    def _safe_csv_value(value: Any) -> Any:
+        """Keep user-controlled text from becoming a spreadsheet formula."""
+        if not isinstance(value, str):
+            return value
+        candidate = value.lstrip(" \t\r\n")
+        if candidate.startswith(("=", "+", "-", "@", "＝", "＋", "－", "＠")):
+            return f"\t{value}"
+        return value
 
     @staticmethod
     def today() -> str:

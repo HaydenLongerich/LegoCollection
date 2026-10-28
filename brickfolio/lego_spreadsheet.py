@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+import posixpath
 from dataclasses import dataclass
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 from xml.etree import ElementTree as ET
 
 
@@ -23,6 +25,14 @@ REQUIRED_HEADERS = {
     "net profit (cad)": "net_profit",
     "notes": "notes",
 }
+
+MAX_WORKBOOK_BYTES = 50 * 1024 * 1024
+MAX_XML_MEMBER_BYTES = 20 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 500
+MAX_COMPRESSION_RATIO = 1_000
+MAX_SPREADSHEET_ROWS = 100_000
+MAX_SPREADSHEET_COLUMNS = 256
 
 
 @dataclass(frozen=True)
@@ -46,53 +56,103 @@ class SpreadsheetSalesBatch:
 def read_main_sales_spreadsheet(path: str | Path) -> SpreadsheetSalesBatch:
     """Read the MAIN sheet from the owner's xlsx sales spreadsheet."""
     path = Path(path)
-    with ZipFile(path) as workbook:
-        shared_strings = _read_shared_strings(workbook)
-        sheet_path = _find_sheet_path(workbook, "main")
-        if sheet_path is None:
-            raise ValueError("No sheet named MAIN was found in this workbook.")
+    if not path.is_file():
+        raise ValueError("The selected spreadsheet does not exist.")
+    if path.stat().st_size > MAX_WORKBOOK_BYTES:
+        raise ValueError("This spreadsheet is too large to import safely (50 MB maximum).")
+    try:
+        with ZipFile(path) as workbook:
+            _validate_workbook(workbook)
+            shared_strings = _read_shared_strings(workbook)
+            sheet_path = _find_sheet_path(workbook, "main")
+            if sheet_path is None:
+                raise ValueError("No sheet named MAIN was found in this workbook.")
 
-        root = ET.fromstring(workbook.read(sheet_path))
-        rows = root.findall(".//main:sheetData/main:row", NS)
-        if not rows:
-            raise ValueError("The MAIN sheet is empty.")
+            root = _read_xml(workbook, sheet_path)
+            rows = root.findall(".//main:sheetData/main:row", NS)
+            if not rows:
+                raise ValueError("The MAIN sheet is empty.")
+            if len(rows) > MAX_SPREADSHEET_ROWS:
+                raise ValueError("This spreadsheet has too many rows to import safely (100,000 maximum).")
 
-        header_values = _row_values(rows[0], shared_strings)
-        header_map = _header_map(header_values)
-        missing = [label for label in REQUIRED_HEADERS if label not in header_map]
-        if missing:
-            expected = ", ".join(REQUIRED_HEADERS)
-            raise ValueError(f"The MAIN sheet is missing columns. Expected: {expected}")
+            header_values = _row_values(rows[0], shared_strings)
+            header_map = _header_map(header_values)
+            missing = [label for label in REQUIRED_HEADERS if label not in header_map]
+            if missing:
+                expected = ", ".join(REQUIRED_HEADERS)
+                raise ValueError(f"The MAIN sheet is missing columns. Expected: {expected}")
 
-        records: list[SpreadsheetSale] = []
-        skipped = 0
-        for row in rows[1:]:
-            values = _row_values(row, shared_strings)
-            record = _record_from_values(values, header_map)
-            if record is None:
-                skipped += 1
-            else:
-                records.append(record)
-        return SpreadsheetSalesBatch(records=records, skipped_rows=skipped)
+            records: list[SpreadsheetSale] = []
+            skipped = 0
+            for row in rows[1:]:
+                values = _row_values(row, shared_strings)
+                record = _record_from_values(values, header_map)
+                if record is None:
+                    skipped += 1
+                else:
+                    records.append(record)
+            return SpreadsheetSalesBatch(records=records, skipped_rows=skipped)
+    except BadZipFile as exc:
+        raise ValueError("This is not a valid .xlsx spreadsheet.") from exc
+
+
+def _validate_workbook(workbook: ZipFile) -> None:
+    members = workbook.infolist()
+    if len(members) > MAX_ARCHIVE_MEMBERS:
+        raise ValueError("This spreadsheet contains too many files to import safely.")
+    if sum(member.file_size for member in members) > MAX_UNCOMPRESSED_BYTES:
+        raise ValueError("This spreadsheet expands beyond the safe import limit.")
+    for member in members:
+        if member.flag_bits & 0x1:
+            raise ValueError("Encrypted spreadsheets cannot be imported.")
+        if member.file_size > MAX_XML_MEMBER_BYTES and member.filename.lower().endswith(".xml"):
+            raise ValueError("This spreadsheet contains an XML part that is too large to import safely.")
+        if member.file_size > 1_000_000 and member.file_size / max(member.compress_size, 1) > MAX_COMPRESSION_RATIO:
+            raise ValueError("This spreadsheet has an unsafe compression ratio.")
+
+
+def _read_xml(workbook: ZipFile, member_name: str) -> ET.Element:
+    try:
+        member = workbook.getinfo(member_name)
+    except KeyError as exc:
+        raise ValueError("This spreadsheet is missing a required internal file.") from exc
+    if member.file_size > MAX_XML_MEMBER_BYTES:
+        raise ValueError("This spreadsheet contains an XML part that is too large to import safely.")
+    content = workbook.read(member)
+    lowered = content.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise ValueError("Spreadsheet XML declarations and entities are not allowed.")
+    try:
+        return ET.fromstring(content)
+    except ET.ParseError as exc:
+        raise ValueError("This spreadsheet contains invalid XML.") from exc
 
 
 def _read_shared_strings(workbook: ZipFile) -> list[str]:
     if "xl/sharedStrings.xml" not in workbook.namelist():
         return []
-    root = ET.fromstring(workbook.read("xl/sharedStrings.xml"))
+    root = _read_xml(workbook, "xl/sharedStrings.xml")
     return [_node_text(item) for item in root.findall("main:si", NS)]
 
 
 def _find_sheet_path(workbook: ZipFile, sheet_name: str) -> str | None:
-    workbook_root = ET.fromstring(workbook.read("xl/workbook.xml"))
-    rels_root = ET.fromstring(workbook.read("xl/_rels/workbook.xml.rels"))
-    relationships = {rel.attrib["Id"]: rel.attrib["Target"] for rel in rels_root}
+    workbook_root = _read_xml(workbook, "xl/workbook.xml")
+    rels_root = _read_xml(workbook, "xl/_rels/workbook.xml.rels")
+    relationships = {
+        rel.attrib["Id"]: rel.attrib["Target"]
+        for rel in rels_root
+        if "Id" in rel.attrib and "Target" in rel.attrib
+    }
     rel_key = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
     for sheet in workbook_root.findall(".//main:sheet", NS):
         if sheet.attrib.get("name", "").strip().casefold() != sheet_name:
             continue
-        target = relationships[sheet.attrib[rel_key]].lstrip("/")
-        return target if target.startswith("xl/") else f"xl/{target}"
+        relationship_id = sheet.attrib.get(rel_key, "")
+        target = relationships.get(relationship_id, "").replace("\\", "/").lstrip("/")
+        normalized = posixpath.normpath(target if target.startswith("xl/") else f"xl/{target}")
+        if not normalized.startswith("xl/worksheets/") or normalized not in workbook.namelist():
+            raise ValueError("The MAIN sheet points to an unsafe or missing internal file.")
+        return normalized
     return None
 
 
@@ -103,6 +163,8 @@ def _row_values(row: ET.Element, shared_strings: list[str]) -> list[str]:
         values[column] = _cell_value(cell, shared_strings)
     if not values:
         return []
+    if max(values) >= MAX_SPREADSHEET_COLUMNS:
+        raise ValueError("This spreadsheet has too many columns to import safely (256 maximum).")
     return [values.get(index, "") for index in range(max(values) + 1)]
 
 
@@ -165,7 +227,8 @@ def _amount(value: str) -> float:
     if not clean:
         return 0.0
     try:
-        return float(clean)
+        amount = float(clean)
+        return amount if math.isfinite(amount) else 0.0
     except ValueError:
         return 0.0
 

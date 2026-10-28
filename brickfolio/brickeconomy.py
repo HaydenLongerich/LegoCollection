@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import csv
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 
 REQUIRED_COLUMNS = {"Number", "Theme", "Year", "Paid", "Value", "Condition"}
 NAME_COLUMNS = ("SetName", "Name")
+MAX_IMPORT_BYTES = 50 * 1024 * 1024
+MAX_IMPORT_ROWS = 100_000
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,12 @@ class ImportBatch:
 
 def read_collection_csv(path: str | Path) -> ImportBatch:
     """Read the documented BrickEconomy Sets export without changing the file."""
-    with Path(path).open("r", encoding="utf-8-sig", newline="") as source:
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError("The selected BrickEconomy export does not exist.")
+    if path.stat().st_size > MAX_IMPORT_BYTES:
+        raise ValueError("This CSV is too large to import safely (50 MB maximum).")
+    with path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.DictReader(source)
         headers = set(reader.fieldnames or [])
         missing = REQUIRED_COLUMNS - headers
@@ -39,7 +47,9 @@ def read_collection_csv(path: str | Path) -> ImportBatch:
             raise ValueError(f"This does not look like a BrickEconomy Sets export. Expected columns: {expected}")
         records: list[BrickEconomySet] = []
         skipped = 0
-        for row in reader:
+        for row_number, row in enumerate(reader, start=1):
+            if row_number > MAX_IMPORT_ROWS:
+                raise ValueError("This CSV has too many rows to import safely (100,000 maximum).")
             set_number = (row.get("Number") or "").strip()
             title = next(((row.get(column) or "").strip() for column in NAME_COLUMNS if (row.get(column) or "").strip()), "")
             if not set_number or not title:
@@ -62,7 +72,8 @@ def read_collection_csv(path: str | Path) -> ImportBatch:
 def parse_amount(value: str) -> float:
     clean = value.strip().replace("$", "").replace(",", "")
     try:
-        return float(clean) if clean else 0.0
+        amount = float(clean) if clean else 0.0
+        return amount if math.isfinite(amount) else 0.0
     except ValueError:
         return 0.0
 
