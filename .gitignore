@@ -1,8 +1,36 @@
-# Local data and Python clutter
-data/*.db
-data/*.db-shm
-data/*.db-wal
-exports/*.csv
+# Private local data. Keep only the empty directory markers in Git.
+data/*
+!data/.gitkeep
+exports/*
+!exports/.gitkeep
+
+# Databases, live SQLite sidecars, and backups must never enter the repo.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.bak
+
+# Common BrickLedger / BrickEconomy files may be selected from any folder.
+BrickEconomy-Sets*.csv
+brickledger-collection*.csv
+brickledger-sales*.csv
+brickledger-boxes*.csv
+brickledger-instructions*.csv
+SETSFORSALE*.csv
+Sets for sale*.csv
+
+# Local secrets and machine-specific settings.
+.env
+.env.*
+!.env.example
+
+# Python clutter
 __pycache__/
 **/__pycache__/
 *.py[cod]
