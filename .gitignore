@@ -1,0 +1,12 @@
+# Local data and Python clutter
+data/*.db
+data/*.db-shm
+data/*.db-wal
+exports/*.csv
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Editor files
+.vscode/
+.idea/
