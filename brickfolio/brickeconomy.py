@@ -83,7 +83,7 @@ def map_condition(value: str) -> str:
     mapping = {
         "new": "New",
         "sealed": "Sealed",
-        "usedcomplete": "Complete",
+        "usedcomplete": "Collection",
         "usedasnew": "Used",
         "usedincomplete": "Incomplete",
         "incomplete": "Incomplete",

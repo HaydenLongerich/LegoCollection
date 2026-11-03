@@ -21,6 +21,52 @@ THEME_ALIASES = {
     "ultimate collector series": "Star Wars",
 }
 
+SPEED_CHAMPIONS_VARIANTS = ("6-stud", "Polybags", "8-stud")
+SPEED_CHAMPIONS_EXCLUDED = {
+    "5004550-1",  # collection pack
+    "5004559-1",  # collection pack
+    "66647-1",    # bundle
+    "66802-1",    # collector's pack
+    "75995-1",    # promotional team gift, not a retail set
+    "TRUPODIUM-1",  # podium accessory
+}
+SPEED_CHAMPIONS_POLYBAGS = {
+    "30342-1", "30343-1", "30434-1", "30657-1", "30683-1", "30709-1", "30734-1",
+}
+
+SPEED_CHAMPIONS_BRANDS = (
+    (("mercedes-amg", "mercedes amg", "mercedes pit"), "Mercedes-AMG"),
+    (("aston martin",), "Aston Martin"),
+    (("red bull",), "Red Bull Racing"),
+    (("visa cash app",), "RB"),
+    (("scuderia ferrari", "laferrari", "f14 t", "458 italia", "ferrari"), "Ferrari"),
+    (("mclaren",), "McLaren"),
+    (("lamborghini",), "Lamborghini"),
+    (("koenigsegg",), "Koenigsegg"),
+    (("chevrolet",), "Chevrolet"),
+    (("corvette",), "Chevrolet"),
+    (("mopar", "dodge"), "Dodge"),
+    (("ford", "hoonicorn"), "Ford"),
+    (("porsche",), "Porsche"),
+    (("nissan",), "Nissan"),
+    (("toyota",), "Toyota"),
+    (("audi",), "Audi"),
+    (("bmw",), "BMW"),
+    (("jaguar",), "Jaguar"),
+    (("mini",), "MINI"),
+    (("bugatti",), "Bugatti"),
+    (("pagani",), "Pagani"),
+    (("lotus",), "Lotus"),
+    (("alpine",), "Alpine"),
+    (("sauber",), "Sauber"),
+    (("haas",), "Haas"),
+    (("williams",), "Williams"),
+    (("apxgp",), "APXGP"),
+    (("f1 academy",), "F1 Academy"),
+    (("lightning mcqueen",), "Disney / Pixar"),
+    (("time machine",), "DeLorean"),
+)
+
 
 def normalise_theme(theme: str) -> str:
     """Return the concise collector-facing theme name."""
@@ -35,6 +81,38 @@ class CatalogSet:
     year: str
     theme: str
     parts: str
+    image_url: str = ""
+
+
+def speed_champions_variant(record: CatalogSet) -> str | None:
+    """Classify only the car sets counted by this collector."""
+    set_number = record.set_number.upper()
+    if record.theme.casefold() != "speed champions" or set_number in SPEED_CHAMPIONS_EXCLUDED:
+        return None
+    if set_number in SPEED_CHAMPIONS_POLYBAGS:
+        return "Polybags"
+    try:
+        year = int(record.year)
+        parts = int(record.parts)
+    except ValueError:
+        return None
+    if parts <= 0:
+        return None
+    if year <= 2019:
+        return "6-stud"
+    if set_number.startswith(("768", "769", "772")):
+        return "8-stud"
+    return None
+
+
+def speed_champions_brand(name: str) -> str:
+    """Return a collector-friendly marque for Speed Champions sorting."""
+    clean = name.strip()
+    lowered = clean.casefold()
+    for aliases, brand in SPEED_CHAMPIONS_BRANDS:
+        if any(alias in lowered for alias in aliases):
+            return brand
+    return clean
 
 
 class OfflineCatalog:
@@ -86,6 +164,7 @@ class OfflineCatalog:
                 CatalogSet(
                     set_number=row["set_num"], name=row["name"], year=row["year"],
                     theme=normalise_theme(themes.get(row["theme_id"], "")), parts=row["num_parts"],
+                    image_url=row.get("img_url", "").strip(),
                 )
                 for row in csv.DictReader(source)
             ]

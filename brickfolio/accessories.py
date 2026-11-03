@@ -17,22 +17,35 @@ from .database import EXPORTS_PATH
 
 
 class AccessoryPage(BasePage):
-    kind = "Box"
-    label = "Boxes"
     columns = ("set_number", "title", "theme", "condition", "location", "notes")
 
     def __init__(self, parent: tk.Misc, app: BrickLedgerApp) -> None:
         super().__init__(parent, app)
+        self.kind = "Box"
+        self.label = "Boxes"
         header = tk.Frame(self, bg=COLORS["paper"])
-        header.pack(fill="x", pady=(0, 24))
+        header.pack(fill="x", pady=(0, 18))
         heading = title_block(
             header,
             "Physical archive",
-            self.label,
-            "Track condition, storage, and notes independently from your set collection.",
+            "Boxes & instructions",
+            "Keep both accessory inventories together, then switch views without leaving the page.",
         )
         heading.pack(side="left")
-        button(header, "Add box" if self.kind == "Box" else "Add instructions", self.add).pack(side="right", anchor="ne", pady=(12, 0))
+        self.add_button = button(header, "+ Add box", self.add)
+        self.add_button.pack(side="right", anchor="ne", pady=(12, 0))
+
+        switcher = tk.Frame(self, bg=COLORS["paper"])
+        switcher.pack(fill="x", pady=(0, 16))
+        self.kind_buttons: dict[str, tk.Button] = {}
+        for kind, label in (("Box", "Boxes"), ("Instructions", "Instructions")):
+            control = tk.Button(
+                switcher, text=label, command=lambda selected=kind: self.select_kind(selected),
+                relief="flat", bd=0, cursor="hand2", font=(FONT, 10, "bold"), padx=24, pady=11,
+            )
+            control.pack(side="left", padx=(0, 8))
+            self.kind_buttons[kind] = control
+        self._style_kind_buttons()
 
         toolbar = tk.Frame(self, bg=COLORS["paper"])
         toolbar.pack(fill="x", pady=(0, 12))
@@ -56,7 +69,6 @@ class AccessoryPage(BasePage):
         self.delete_button = button(footer, "Delete", self.delete, "danger")
         self.delete_button.pack(side="left", padx=8)
         button(footer, "Export CSV", self.export, "ink").pack(side="right")
-        button(footer, "Copy checked sets", self.copy_checked, "soft").pack(side="right", padx=8)
 
         table = tk.Frame(self, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1)
         table.pack(fill="both", expand=True)
@@ -80,6 +92,23 @@ class AccessoryPage(BasePage):
         self.query.trace_add("write", lambda *_: self.refresh())
         sorter.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
         self.update_actions()
+
+    def select_kind(self, kind: str) -> None:
+        self.kind = kind
+        self.label = "Boxes" if kind == "Box" else "Instructions"
+        self.add_button.configure(text="+ Add box" if kind == "Box" else "+ Add instructions")
+        self._style_kind_buttons()
+        self.refresh()
+
+    def _style_kind_buttons(self) -> None:
+        for kind, control in self.kind_buttons.items():
+            active = kind == self.kind
+            control.configure(
+                bg=COLORS["accent"] if active else COLORS["card"],
+                fg=COLORS["black"] if active else COLORS["ink"],
+                activebackground=COLORS["accent_hover"] if active else COLORS["hover"],
+                activeforeground=COLORS["black"] if active else COLORS["ink"],
+            )
 
     def selected_id(self) -> int | None:
         selection = self.tree.selection()
@@ -170,6 +199,10 @@ class InstructionsPage(AccessoryPage):
     label = "Instructions"
 
 
+class AccessoriesPage(AccessoryPage):
+    """Combined boxes and instruction inventory used by the main navigation."""
+
+
 class AccessoryDialog(tk.Toplevel):
     def __init__(self, parent: tk.Misc, app: BrickLedgerApp, kind: str, item_id: int | None = None) -> None:
         super().__init__(parent)
@@ -181,9 +214,9 @@ class AccessoryDialog(tk.Toplevel):
         make_toplevel_window_resizable(self, 720, 520)
         self.grab_set()
         self.bind("<Escape>", lambda _event: self.destroy())
-        header = tk.Frame(self, bg=COLORS["ink"])
+        header = tk.Frame(self, bg=COLORS["black"])
         header.pack(fill="x")
-        tk.Label(header, text=f"{'Edit' if record else 'Add'} {kind.lower()}", bg=COLORS["ink"], fg=COLORS["paper"],
+        tk.Label(header, text=f"{'Edit' if record else 'Add'} {kind.lower()}", bg=COLORS["black"], fg=COLORS["ink"],
                  font=(FONT, 18, "bold")).pack(side="left", padx=24, pady=18)
         button(header, "Browse sets", self.browse, "soft").pack(side="right", padx=24)
         footer = tk.Frame(self, bg=COLORS["paper"])

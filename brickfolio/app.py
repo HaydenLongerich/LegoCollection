@@ -9,43 +9,53 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
-from .catalog import CatalogSet, OfflineCatalog
+from PIL import ImageTk
+
+from .catalog import (
+    CatalogSet,
+    OfflineCatalog,
+    SPEED_CHAMPIONS_VARIANTS,
+    speed_champions_brand,
+    speed_champions_variant,
+)
 from .brickeconomy import ImportBatch, read_collection_csv
 from .database import Database, EXPORTS_PATH
+from .images import SetImageCache
 from .lego_spreadsheet import read_main_sales_spreadsheet
 
 
 COLORS = {
-    # Shared with the Hayden Longerich portfolio: warm paper, olive ink,
-    # botanical neutrals, and one bright chartreuse accent.
-    "ink": "#242A23",
-    "ink_soft": "#465337",
-    "paper": "#F5F4EE",
-    "paper_alt": "#EFEFE6",
-    "card": "#FBFBF6",
-    "line": "#CBD0C0",
-    "muted": "#69745E",
-    "brick": "#6D863B",
-    "brick_dark": "#465C32",
-    "accent": "#D5ED97",
-    "accent_hover": "#C7DF87",
-    "yellow": "#D5ED97",
-    "sage": "#D9E5C5",
-    "sage_ink": "#465C32",
-    "blue": "#E2E8D8",
-    "blue_ink": "#566A42",
-    "lavender": "#E8EBDD",
-    "lavender_ink": "#5F6955",
-    "danger": "#9A3E43",
-    "selection": "#DCE9BC",
-    "heading": "#E8EBDF",
-    "hover": "#DFE4D5",
-    "nav_muted": "#B9C3A4",
-    "complete": "#E7F2C6",
-    "success_bg": "#E5EDDA",
-    "warning_bg": "#F0EBD5",
-    "danger_bg": "#F3E4E2",
-    "danger_hover": "#EBD4D1",
+    # Hayden Longerich portfolio palette: near-black surfaces and its exact
+    # electric chartreuse accent.
+    "black": "#070708",
+    "ink": "#F4F4F0",
+    "ink_soft": "#222225",
+    "paper": "#0D0D0F",
+    "paper_alt": "#131315",
+    "card": "#18181B",
+    "line": "#303034",
+    "muted": "#99999F",
+    "brick": "#D2FF00",
+    "brick_dark": "#B8DF00",
+    "accent": "#D2FF00",
+    "accent_hover": "#BFE800",
+    "yellow": "#D2FF00",
+    "sage": "#253012",
+    "sage_ink": "#D2FF00",
+    "blue": "#192629",
+    "blue_ink": "#A9DDE5",
+    "lavender": "#28212E",
+    "lavender_ink": "#D8B7EA",
+    "danger": "#FF777D",
+    "selection": "#344000",
+    "heading": "#202023",
+    "hover": "#252528",
+    "nav_muted": "#A7A7AD",
+    "complete": "#243000",
+    "success_bg": "#1C260E",
+    "warning_bg": "#27260C",
+    "danger_bg": "#32191C",
+    "danger_hover": "#482126",
 }
 
 FONT = "Segoe UI"
@@ -71,10 +81,16 @@ class BrickLedgerApp(tk.Tk):
         self.configure(bg=COLORS["paper"])
         self.db = Database()
         self.catalog = OfflineCatalog()
+        self.image_cache = SetImageCache(self)
         self.nav_buttons: dict[str, tk.Button] = {}
         self.pages: dict[str, BasePage] = {}
+        self._fullscreen = False
         self._setup_style()
         self._build_shell()
+        self.bind("<F11>", self.toggle_fullscreen)
+        self.bind("<Escape>", self.exit_fullscreen)
+        if os.name == "nt":
+            self.after(0, lambda: self.state("zoomed"))
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page("Overview")
 
@@ -116,43 +132,43 @@ class BrickLedgerApp(tk.Tk):
         self.option_add("*TCombobox*Listbox.selectForeground", COLORS["ink"])
 
     def _build_shell(self) -> None:
-        navigation = tk.Frame(self, bg=COLORS["ink"], width=248)
+        navigation = tk.Frame(self, bg=COLORS["black"], width=256)
         navigation.pack(side="left", fill="y")
         navigation.pack_propagate(False)
 
-        brand = tk.Frame(navigation, bg=COLORS["ink"])
+        brand = tk.Frame(navigation, bg=COLORS["black"])
         brand.pack(fill="x", padx=28, pady=(34, 44))
-        mark = tk.Canvas(brand, width=13, height=38, bg=COLORS["ink"], highlightthickness=0)
+        mark = tk.Canvas(brand, width=13, height=38, bg=COLORS["black"], highlightthickness=0)
         mark.pack(side="left")
         mark.create_oval(2, 14, 10, 22, fill=COLORS["accent"], outline="")
-        identity = tk.Frame(brand, bg=COLORS["ink"])
+        identity = tk.Frame(brand, bg=COLORS["black"])
         identity.pack(side="left", padx=(11, 0))
-        tk.Label(identity, text="brickledger.", bg=COLORS["ink"], fg=COLORS["paper"],
+        tk.Label(identity, text="brickledger.", bg=COLORS["black"], fg=COLORS["ink"],
                  font=(FONT, 18, "bold")).pack(anchor="w")
-        tk.Label(identity, text="Your collection, considered.", bg=COLORS["ink"], fg=COLORS["nav_muted"],
+        tk.Label(identity, text="Your collection, considered.", bg=COLORS["black"], fg=COLORS["nav_muted"],
                  font=(FONT, 8)).pack(anchor="w", pady=(1, 0))
 
         tk.Label(
-            navigation, text="COLLECTION / 2026", bg=COLORS["ink"], fg=COLORS["nav_muted"],
+            navigation, text="LEDGER / 2026", bg=COLORS["black"], fg=COLORS["nav_muted"],
             font=(FONT, 8, "bold"), anchor="w",
         ).pack(fill="x", padx=30, pady=(0, 12))
         nav_items = (
-            ("00", "Overview"), ("01", "Collection"), ("02", "Boxes"),
-            ("03", "Instructions"), ("04", "Sales desk"), ("05", "Data & exports"),
+            ("00", "Overview"), ("01", "All Sets"), ("02", "My Collection"),
+            ("03", "Boxes & Instructions"), ("04", "Sales"), ("05", "Exports"),
         )
         for number, label in nav_items:
             button = tk.Button(
                 navigation, text=f"{number}   {label}", anchor="w", command=lambda name=label: self.show_page(name),
-                bg=COLORS["ink"], fg=COLORS["nav_muted"], activebackground=COLORS["ink_soft"], activeforeground=COLORS["paper"],
+                bg=COLORS["black"], fg=COLORS["nav_muted"], activebackground=COLORS["ink_soft"], activeforeground=COLORS["ink"],
                 relief="flat", bd=0, font=(FONT, 10), padx=18, pady=13, cursor="hand2",
             )
             button.pack(fill="x", padx=14, pady=2)
             self.nav_buttons[label] = button
 
-        bottom = tk.Frame(navigation, bg=COLORS["ink"])
+        bottom = tk.Frame(navigation, bg=COLORS["black"])
         bottom.pack(side="bottom", fill="x", padx=30, pady=30)
-        tk.Label(bottom, text="LOCAL-FIRST / PRIVATE", bg=COLORS["ink"], fg=COLORS["accent"], font=(FONT, 8, "bold")).pack(anchor="w")
-        tk.Label(bottom, text="No account. No cloud. Just your sets.", bg=COLORS["ink"], fg=COLORS["nav_muted"], font=(FONT, 8)).pack(anchor="w", pady=(6, 0))
+        tk.Label(bottom, text="LOCAL-FIRST / PRIVATE", bg=COLORS["black"], fg=COLORS["accent"], font=(FONT, 8, "bold")).pack(anchor="w")
+        tk.Label(bottom, text="No account. No cloud. Just your sets.", bg=COLORS["black"], fg=COLORS["nav_muted"], font=(FONT, 8)).pack(anchor="w", pady=(6, 0))
 
         workspace = tk.Frame(self, bg=COLORS["paper"])
         workspace.pack(side="left", fill="both", expand=True)
@@ -169,16 +185,16 @@ class BrickLedgerApp(tk.Tk):
         self.page_host.pack(fill="both", expand=True, padx=46, pady=(4, 38))
 
     def show_page(self, name: str) -> None:
-        from .accessories import BoxesPage, InstructionsPage
+        from .accessories import AccessoriesPage
 
         page_type: type[BasePage]
         page_type = {
             "Overview": OverviewPage,
-            "Collection": CollectionPage,
-            "Boxes": BoxesPage,
-            "Instructions": InstructionsPage,
-            "Sales desk": SalesPage,
-            "Data & exports": DataPage,
+            "All Sets": CollectionPage,
+            "My Collection": MyCollectionPage,
+            "Boxes & Instructions": AccessoriesPage,
+            "Sales": SalesPage,
+            "Exports": DataPage,
         }[name]
         for page in self.pages.values():
             page.pack_forget()
@@ -187,20 +203,32 @@ class BrickLedgerApp(tk.Tk):
         page = self.pages[name]
         page.pack(fill="both", expand=True)
         page.refresh()
-        page_number = {"Overview": "00", "Collection": "01", "Boxes": "02", "Instructions": "03", "Sales desk": "04", "Data & exports": "05"}[name]
+        page_number = {"Overview": "00", "All Sets": "01", "My Collection": "02", "Boxes & Instructions": "03", "Sales": "04", "Exports": "05"}[name]
         self.breadcrumb.configure(text=f"{page_number} / {name.upper()}")
         for label, button in self.nav_buttons.items():
             selected = label == name
             button.configure(
-                bg=COLORS["accent"] if selected else COLORS["ink"],
-                fg=COLORS["ink"] if selected else COLORS["nav_muted"],
+                bg=COLORS["accent"] if selected else COLORS["black"],
+                fg=COLORS["black"] if selected else COLORS["nav_muted"],
             )
 
     def refresh_everything(self) -> None:
         for page in self.pages.values():
             page.refresh()
 
+    def toggle_fullscreen(self, _event: tk.Event | None = None) -> str:
+        self._fullscreen = not self._fullscreen
+        self.attributes("-fullscreen", self._fullscreen)
+        return "break"
+
+    def exit_fullscreen(self, _event: tk.Event | None = None) -> str:
+        if self._fullscreen:
+            self._fullscreen = False
+            self.attributes("-fullscreen", False)
+        return "break"
+
     def close(self) -> None:
+        self.image_cache.close()
         self.db.close()
         self.destroy()
 
@@ -224,9 +252,9 @@ def title_block(parent: tk.Misc, eyebrow: str, title: str, copy: str) -> tk.Fram
 
 def button(parent: tk.Misc, text: str, command: Callable[[], None], kind: str = "primary", width: int | None = None) -> tk.Button:
     palette = {
-        "primary": (COLORS["ink"], COLORS["paper"], COLORS["ink_soft"]),
-        "ink": (COLORS["ink"], COLORS["paper"], COLORS["ink_soft"]),
-        "soft": (COLORS["accent"], COLORS["ink"], COLORS["accent_hover"]),
+        "primary": (COLORS["accent"], COLORS["black"], COLORS["accent_hover"]),
+        "ink": (COLORS["black"], COLORS["ink"], COLORS["ink_soft"]),
+        "soft": (COLORS["card"], COLORS["ink"], COLORS["hover"]),
         "plain": (COLORS["card"], COLORS["ink"], COLORS["heading"]),
         "danger": (COLORS["danger_bg"], COLORS["danger"], COLORS["danger_hover"]),
     }
@@ -357,8 +385,8 @@ class OverviewPage(BasePage):
         self.activity_list.pack(fill="both", expand=True, padx=22, pady=(13, 18))
 
     def open_sales_history(self, sale_id: str | None = None) -> None:
-        self.app.show_page("Sales desk")
-        page = self.app.pages["Sales desk"]
+        self.app.show_page("Sales")
+        page = self.app.pages["Sales"]
         page.search_var.set("")
         if sale_id and page.tree.exists(sale_id):
             page.tree.selection_set(sale_id)
@@ -438,13 +466,17 @@ class OverviewPage(BasePage):
 
 
 class CollectionPage(BasePage):
-    columns = ("set_number", "title", "theme", "condition", "paid", "value", "status", "notes", "built", "disassembled", "box", "instructions")
+    columns = ("set_number", "title", "theme", "condition", "paid", "value", "status", "notes", "built", "disassembled")
+    condition_filter = "All"
+    page_eyebrow = "The complete ledger"
+    page_title = "Every set, one clear view."
+    page_copy = "Search, filter, edit, and value every set from a single workspace."
 
     def __init__(self, parent: tk.Misc, app: BrickLedgerApp) -> None:
         super().__init__(parent, app)
         header_row = tk.Frame(self, bg=COLORS["paper"])
         header_row.pack(fill="x")
-        header = title_block(header_row, "The catalogue", "Every brick has a place.", "Keep a clear, sellable record of the sets in your orbit.")
+        header = title_block(header_row, self.page_eyebrow, self.page_title, self.page_copy)
         header.pack(side="left", anchor="nw")
         actions = tk.Frame(header_row, bg=COLORS["paper"])
         actions.pack(side="right", anchor="ne", pady=(13, 0))
@@ -494,9 +526,9 @@ class CollectionPage(BasePage):
         table_card.pack(fill="both", expand=True)
         tree_frame = tk.Frame(table_card, bg=COLORS["card"])
         tree_frame.pack(fill="both", expand=True, padx=1, pady=1)
-        headings = {"set_number": "SET #", "title": "SET NAME", "theme": "THEME", "condition": "CONDITION", "paid": "PAID", "value": "EST. VALUE", "status": "STATUS", "notes": "NOTES", "built": "BUILT", "disassembled": "DISASSEMBLED", "box": "BOX", "instructions": "INSTRUCTIONS"}
+        headings = {"set_number": "SET #", "title": "SET NAME", "theme": "THEME", "condition": "CONDITION", "paid": "PAID", "value": "EST. VALUE", "status": "STATUS", "notes": "NOTES", "built": "BUILT", "disassembled": "DISASSEMBLED"}
         self.tree = ttk.Treeview(tree_frame, columns=self.columns, show="headings", selectmode="browse")
-        widths = {"set_number": 100, "title": 310, "theme": 170, "condition": 110, "paid": 90, "value": 105, "status": 95, "notes": 280, "built": 70, "disassembled": 125, "box": 65, "instructions": 115}
+        widths = {"set_number": 100, "title": 310, "theme": 170, "condition": 115, "paid": 90, "value": 105, "status": 95, "notes": 280, "built": 70, "disassembled": 125}
         numeric_columns = {"paid", "value"}
         stretch_columns = {"title", "notes"}
         for column in self.columns:
@@ -542,7 +574,7 @@ class CollectionPage(BasePage):
 
     def refresh_sections(self) -> None:
         for status, section in self.section_buttons.items():
-            records = self.app.db.collection(status=status)
+            records = self.app.db.collection(status=status, condition=self.condition_filter)
             total_value = sum(float(record["estimated_value"]) * int(record["quantity"]) for record in records)
             detail = getattr(section, "_detail")
             accent = getattr(section, "_accent")
@@ -583,21 +615,21 @@ class CollectionPage(BasePage):
             return
         for item in self.tree.get_children():
             self.tree.delete(item)
-        rows = self.app.db.collection(self.search_var.get(), self.status_var.get())
+        rows = self.app.db.collection(
+            self.search_var.get(), self.status_var.get(), condition=self.condition_filter
+        )
         for row in rows:
             tags = []
-            if row["condition"] == "Complete":
+            if row["condition"] == "Collection":
                 tags.append("complete")
             if row["status"] == "Sold":
                 tags.append("sold")
             notes = " ".join(str(row["notes"] or "").split())
             built = "Built" if int(row["built"] or 0) else ""
             disassembled = "Disassembled" if int(row["disassembled"] or 0) else ""
-            box = "Box" if int(row["has_box"] or 0) else ""
-            instructions = "Instructions" if int(row["has_instructions"] or 0) else ""
             self.tree.insert(
                 "", "end", iid=str(row["id"]), tags=tuple(tags),
-                values=(row["set_number"], row["title"], row["theme"] or "-", row["condition"], money(row["purchase_price"]), money(row["estimated_value"]), row["status"], notes, built, disassembled, box, instructions),
+                values=(row["set_number"], row["title"], row["theme"] or "-", row["condition"], money(row["purchase_price"]), money(row["estimated_value"]), row["status"], notes, built, disassembled),
             )
         self.count_label.configure(text=f"{len(rows)} set record{'' if len(rows) == 1 else 's'}")
         self.refresh_sections()
@@ -606,6 +638,596 @@ class CollectionPage(BasePage):
     def refresh(self) -> None:
         self.refresh_sections()
         self.load_rows()
+
+
+class MyCollectionPage(BasePage):
+    """A visual, image-led view of sets marked as part of the collection."""
+
+    def __init__(self, parent: tk.Misc, app: BrickLedgerApp) -> None:
+        super().__init__(parent, app)
+        self._photos: list[ImageTk.PhotoImage] = []
+        self._gallery_generation = 0
+        self._gallery_tasks: list[tuple[Callable[[], tk.Frame], int, int, int]] = []
+        self._gallery_signature: tuple[Any, ...] | None = None
+        self._refresh_job: str | None = None
+        self._retired_galleries: list[tuple[tk.Frame, list[tk.Widget]]] = []
+        self._gallery_cleanup_job: str | None = None
+        self._gallery_columns = 4
+        self._reflow_job: str | None = None
+        self._lazy_images: dict[tk.Label, tuple[str, str]] = {}
+        self._lazy_image_job: str | None = None
+
+        header_row = tk.Frame(self, bg=COLORS["paper"])
+        header_row.pack(fill="x")
+        title_block(
+            header_row,
+            "Your personal collection",
+            "Your Collection",
+            "Track your Speed Champions progress and browse the collection as a visual gallery.",
+        ).pack(side="left", anchor="nw")
+        header_actions = tk.Frame(header_row, bg=COLORS["paper"])
+        header_actions.pack(side="right", anchor="ne", pady=(13, 0))
+        button(header_actions, "+ Add a set", self.add_set).pack(anchor="e")
+        self.collection_totals = tk.Label(
+            header_actions, text="", bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT, 9, "bold")
+        )
+        self.collection_totals.pack(anchor="e", pady=(10, 0))
+
+        progress = tk.Frame(self, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1)
+        progress.pack(fill="x", pady=(25, 17))
+        progress_copy = tk.Frame(progress, bg=COLORS["card"])
+        progress_copy.pack(side="left", fill="both", expand=True, padx=22, pady=17)
+        tk.Label(progress_copy, text="SPEED CHAMPIONS COMPLETION", bg=COLORS["card"], fg=COLORS["accent"],
+                 font=(FONT, 8, "bold")).pack(anchor="w")
+        self.speed_value = tk.Label(progress_copy, text="—", bg=COLORS["card"], fg=COLORS["ink"],
+                                    font=(FONT, 22, "bold"))
+        self.speed_value.pack(anchor="w", pady=(4, 1))
+        self.speed_note = tk.Label(progress_copy, text="", bg=COLORS["card"], fg=COLORS["muted"],
+                                   font=(FONT, 9))
+        self.speed_note.pack(anchor="w")
+        progress_visual = tk.Frame(progress, bg=COLORS["card"], width=540, height=112)
+        progress_visual.pack(side="right", fill="y", padx=22, pady=18)
+        progress_visual.pack_propagate(False)
+        progress_top = tk.Frame(progress_visual, bg=COLORS["card"])
+        progress_top.pack(fill="x")
+        self.speed_stats = tk.Label(progress_top, text="", bg=COLORS["card"], fg=COLORS["accent"],
+                                    font=(FONT, 9, "bold"))
+        self.speed_stats.pack(side="left", anchor="w", pady=(3, 0))
+        self.progress_percent = tk.Label(progress_top, text="", bg=COLORS["card"], fg=COLORS["accent"],
+                                         font=(FONT, 14, "bold"))
+        self.progress_percent.pack(side="right", anchor="e")
+        self.progress_bar = tk.Canvas(progress_visual, height=12, bg=COLORS["heading"], highlightthickness=0)
+        self.progress_bar.pack(fill="x", pady=(11, 0))
+        self.progress_bar.bind("<Configure>", lambda _event: self._draw_progress())
+        self._progress_ratio = 0.0
+        variants = tk.Frame(progress_visual, bg=COLORS["card"])
+        variants.pack(fill="x", pady=(12, 0))
+        self.variant_values: dict[str, tk.Label] = {}
+        for index, variant in enumerate(SPEED_CHAMPIONS_VARIANTS):
+            cell = tk.Frame(variants, bg=COLORS["heading"])
+            cell.pack(side="left", fill="x", expand=True, padx=(0 if index == 0 else 4, 0 if index == 2 else 4))
+            tk.Label(cell, text=variant.upper(), bg=COLORS["heading"], fg=COLORS["muted"],
+                     font=(FONT, 7, "bold")).pack(anchor="w", padx=9, pady=(6, 1))
+            value = tk.Label(cell, text="—", bg=COLORS["heading"], fg=COLORS["ink"], font=(FONT, 10, "bold"))
+            value.pack(anchor="w", padx=9, pady=(0, 6))
+            self.variant_values[variant] = value
+
+        toolbar = tk.Frame(self, bg=COLORS["paper"])
+        toolbar.pack(fill="x", pady=(0, 12))
+        search_shell = tk.Frame(toolbar, bg=COLORS["card"], highlightthickness=1, highlightbackground=COLORS["line"])
+        search_shell.pack(side="left", fill="x", expand=True)
+        tk.Label(search_shell, text="Search collection", bg=COLORS["card"], fg=COLORS["muted"],
+                 font=(FONT, 10)).pack(side="left", padx=(12, 8))
+        self.search_var = tk.StringVar()
+        search = tk.Entry(search_shell, textvariable=self.search_var, bg=COLORS["card"], fg=COLORS["ink"],
+                          insertbackground=COLORS["ink"], relief="flat", font=(FONT, 10), highlightthickness=0)
+        search.pack(side="left", fill="x", expand=True, ipady=9, padx=(0, 8))
+        sort_shell = tk.Frame(toolbar, bg=COLORS["paper"])
+        sort_shell.pack(side="left", padx=(12, 0))
+        tk.Label(sort_shell, text="SPEED CHAMPIONS SORT", bg=COLORS["paper"], fg=COLORS["muted"],
+                 font=(FONT, 7, "bold")).pack(anchor="w")
+        self.speed_sort_var = tk.StringVar(value="Brand")
+        speed_sort = ttk.Combobox(
+            sort_shell,
+            textvariable=self.speed_sort_var,
+            values=("Brand", "Year released", "Pieces (most–less)", "Alphabetical order"),
+            state="readonly",
+            width=21,
+        )
+        speed_sort.pack(anchor="w", pady=(2, 0))
+        speed_sort.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
+        view_shell = tk.Frame(toolbar, bg=COLORS["paper"])
+        view_shell.pack(side="left", padx=(10, 0))
+        tk.Label(view_shell, text="SPEED CHAMPIONS VIEW", bg=COLORS["paper"], fg=COLORS["muted"],
+                 font=(FONT, 7, "bold")).pack(anchor="w")
+        self.speed_view_var = tk.StringVar(value="Separate 6 & 8 stud")
+        speed_view = ttk.Combobox(
+            view_shell,
+            textvariable=self.speed_view_var,
+            values=("Separate 6 & 8 stud", "All together"),
+            state="readonly",
+            width=19,
+        )
+        speed_view.pack(anchor="w", pady=(2, 0))
+        speed_view.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
+        self.count_label = tk.Label(toolbar, text="", bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT, 9))
+        self.count_label.pack(side="right", padx=(16, 0))
+        self.search_var.trace_add("write", lambda *_: self._schedule_refresh())
+
+        gallery_shell = tk.Frame(self, bg=COLORS["paper"])
+        gallery_shell.pack(fill="both", expand=True)
+        self.gallery_canvas = tk.Canvas(gallery_shell, bg=COLORS["paper"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(gallery_shell, orient="vertical", command=self._scroll_gallery)
+        scrollbar.pack(side="right", fill="y")
+        self.gallery_canvas.pack(side="left", fill="both", expand=True)
+        self.gallery_canvas.configure(yscrollcommand=scrollbar.set)
+        self.gallery = tk.Frame(self.gallery_canvas, bg=COLORS["paper"])
+        self.gallery_window = self.gallery_canvas.create_window((0, 0), window=self.gallery, anchor="nw")
+        self.gallery_canvas.itemconfigure(self.gallery_window, width=max(self.gallery_canvas.winfo_width(), 1))
+        self.gallery.bind("<Configure>", self._update_scroll_region)
+        self.gallery_canvas.bind("<Configure>", self._resize_gallery)
+        self.gallery_canvas.bind("<Enter>", self._bind_wheel)
+        self.gallery_canvas.bind("<Leave>", self._unbind_wheel)
+
+    def add_set(self) -> None:
+        SetDialog(self, self.app, on_saved=self.app.refresh_everything)
+
+    def add_catalog_set(self, record: CatalogSet) -> None:
+        dialog = SetDialog(self, self.app, on_saved=self.app.refresh_everything)
+        dialog.apply_catalog_set(record)
+        dialog.vars["condition"].set("Collection")
+        dialog.vars["status"].set("Keeping")
+
+    def edit_set(self, item_id: int) -> None:
+        SetDialog(self, self.app, item_id=item_id, on_saved=self.app.refresh_everything)
+
+    def refresh(self) -> None:
+        all_collection = self.app.db.collection(condition="Collection", sort="Alphabetical A-Z")
+        query = self.search_var.get().strip().casefold() if hasattr(self, "search_var") else ""
+        rows = [row for row in all_collection if not query or self._matches(row, query)]
+        missing = self._refresh_speed_champions(all_collection)
+        visible_missing = [record for record in missing if not query or self._catalog_matches(record, query)]
+        signature = (
+            tuple((int(row["id"]), str(row["updated_at"])) for row in rows),
+            tuple(record.set_number for record in visible_missing),
+            self.speed_sort_var.get(),
+            self.speed_view_var.get(),
+        )
+        if signature != self._gallery_signature:
+            self._gallery_signature = signature
+            self._build_gallery(rows, visible_missing)
+        self.count_label.configure(text=f"{len(rows)} of {len(all_collection)} sets")
+        total_built = sum(bool(int(row["built"] or 0)) for row in all_collection)
+        total_pieces = sum(self._row_piece_count(row) for row in all_collection)
+        self.collection_totals.configure(
+            text=f"{len(all_collection):,} SETS   ·   {total_built:,} BUILT   ·   {total_pieces:,} PIECES"
+        )
+
+    def _schedule_refresh(self) -> None:
+        if self._refresh_job is not None:
+            try:
+                self.after_cancel(self._refresh_job)
+            except tk.TclError:
+                pass
+        self._refresh_job = self.after(140, self._run_scheduled_refresh)
+
+    def _run_scheduled_refresh(self) -> None:
+        self._refresh_job = None
+        self.refresh()
+
+    @staticmethod
+    def _matches(row: Any, query: str) -> bool:
+        return any(query in str(row[key] or "").casefold() for key in ("set_number", "title", "theme", "notes"))
+
+    @staticmethod
+    def _catalog_matches(record: CatalogSet, query: str) -> bool:
+        return any(
+            query in str(value or "").casefold()
+            for value in (record.set_number, record.name, record.theme, record.year, record.parts)
+        )
+
+    @staticmethod
+    def _missing_speed_champions(catalogue: list[CatalogSet], rows: list[Any]) -> list[CatalogSet]:
+        owned_numbers = {str(row["set_number"]).strip().upper() for row in rows}
+        return [record for record in catalogue if record.set_number.upper() not in owned_numbers]
+
+    def _refresh_speed_champions(self, rows: list[Any]) -> list[CatalogSet]:
+        all_speed_champions = self.app.catalog.search(theme="Speed Champions", limit=100_000)
+        catalogue = [record for record in all_speed_champions if speed_champions_variant(record) is not None]
+        missing = self._missing_speed_champions(catalogue, rows)
+        total = len(catalogue)
+        remaining = len(missing)
+        owned = total - remaining
+        ratio = owned / total if total else 0.0
+        self._progress_ratio = ratio
+        self.speed_value.configure(text=f"{owned} / {total} sets")
+        self.speed_note.configure(text=f"{remaining} remaining in the current catalogue" if remaining else "Current catalogue complete")
+        self.progress_percent.configure(text=f"{ratio * 100:.1f}%")
+        owned_numbers = {str(row["set_number"]).strip().upper() for row in rows}
+        owned_speed_rows = [
+            row for row in rows
+            if (record := self.app.catalog.lookup(str(row["set_number"]))) is not None
+            and speed_champions_variant(record) is not None
+        ]
+        speed_built = sum(bool(int(row["built"] or 0)) for row in owned_speed_rows)
+        speed_pieces = sum(self._row_piece_count(row) for row in owned_speed_rows)
+        self.speed_stats.configure(text=f"{speed_built:,} BUILT   ·   {speed_pieces:,} OWNED PIECES")
+        for variant in SPEED_CHAMPIONS_VARIANTS:
+            variant_records = [record for record in catalogue if speed_champions_variant(record) == variant]
+            variant_owned = sum(record.set_number.upper() in owned_numbers for record in variant_records)
+            self.variant_values[variant].configure(text=f"{variant_owned} / {len(variant_records)}")
+        self._draw_progress()
+        return missing
+
+    def _row_piece_count(self, row: Any) -> int:
+        record = self.app.catalog.lookup(str(row["set_number"]))
+        if not record:
+            return 0
+        try:
+            quantity = max(int(row["quantity"] or 1), 1)
+            return max(int(record.parts), 0) * quantity
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _record_piece_count(record: CatalogSet) -> int:
+        try:
+            return max(int(record.parts), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _speed_record_sort_key(self, record: CatalogSet) -> tuple[Any, ...]:
+        selected = self.speed_sort_var.get() if hasattr(self, "speed_sort_var") else "Brand"
+        if selected == "Year released":
+            return (-int(record.year or 0), record.name.casefold())
+        if selected == "Pieces (most–less)":
+            return (-self._record_piece_count(record), record.name.casefold())
+        if selected == "Alphabetical order":
+            return (record.name.casefold(),)
+        return (speed_champions_brand(record.name).casefold(), record.name.casefold())
+
+    def _speed_row_sort_key(self, row: Any) -> tuple[Any, ...]:
+        record = self.app.catalog.lookup(str(row["set_number"]))
+        if record:
+            return self._speed_record_sort_key(record)
+        return (str(row["title"] or "").casefold(),)
+
+    def _draw_progress(self) -> None:
+        if not hasattr(self, "progress_bar"):
+            return
+        width = max(self.progress_bar.winfo_width(), 1)
+        self.progress_bar.delete("all")
+        self.progress_bar.create_rectangle(0, 0, width, 12, fill=COLORS["heading"], outline="")
+        self.progress_bar.create_rectangle(0, 0, width * self._progress_ratio, 12, fill=COLORS["accent"], outline="")
+
+    def _build_gallery(self, rows: list[Any], missing: list[CatalogSet]) -> None:
+        self._gallery_generation += 1
+        generation = self._gallery_generation
+        self._gallery_tasks = []
+        old_gallery = self.gallery
+        old_window = self.gallery_window
+        old_children = list(old_gallery.winfo_children())
+        self.gallery = tk.Frame(self.gallery_canvas, bg=COLORS["paper"])
+        self.gallery_window = self.gallery_canvas.create_window((0, 0), window=self.gallery, anchor="nw")
+        self.gallery.bind("<Configure>", self._update_scroll_region)
+        self.gallery_canvas.delete(old_window)
+        self._retired_galleries.append((old_gallery, old_children))
+        if self._gallery_cleanup_job is None:
+            self._gallery_cleanup_job = self.after(70, self._cleanup_retired_gallery)
+        self._photos.clear()
+        self._lazy_images.clear()
+        self.gallery_canvas.yview_moveto(0)
+        columns = self._desired_columns(self.gallery_canvas.winfo_width())
+        self._gallery_columns = columns
+        for column in range(columns):
+            self.gallery.columnconfigure(column, weight=1, uniform="collection-card")
+        if not rows and not missing:
+            tk.Label(self.gallery, text="No collection or missing sets match this search.", bg=COLORS["paper"], fg=COLORS["muted"],
+                     font=(FONT, 11)).grid(row=0, column=0, columnspan=columns, pady=50)
+            return
+        groups: dict[str, list[Any]] = {}
+        separate_speed = self.speed_view_var.get() != "All together"
+        for row in rows:
+            theme = str(row["theme"] or "Other")
+            section = theme
+            if separate_speed and theme.casefold() == "speed champions":
+                record = self.app.catalog.lookup(str(row["set_number"]))
+                variant = speed_champions_variant(record) if record else None
+                if variant:
+                    section = f"Speed Champions · {variant}"
+            groups.setdefault(section, []).append(row)
+
+        variant_order = {variant.casefold(): index for index, variant in enumerate(SPEED_CHAMPIONS_VARIANTS)}
+
+        def section_order(section: str) -> tuple[int, int, str]:
+            prefix, _, variant = section.partition(" · ")
+            if prefix.casefold() == "speed champions":
+                return 0, variant_order.get(variant.casefold(), len(variant_order)), section.casefold()
+            return 1, 0, section.casefold()
+
+        themes = sorted(groups, key=section_order)
+        gallery_row = 0
+        if missing:
+            missing_sections = (
+                [
+                    (f"Missing Speed Champions · {variant}", [record for record in missing if speed_champions_variant(record) == variant])
+                    for variant in SPEED_CHAMPIONS_VARIANTS
+                ]
+                if separate_speed
+                else [("Missing Speed Champions", list(missing))]
+            )
+            for missing_title, variant_missing in missing_sections:
+                if not variant_missing:
+                    continue
+                variant_missing.sort(key=self._speed_record_sort_key)
+                missing_pieces = sum(self._record_piece_count(record) for record in variant_missing)
+                self._make_theme_header(
+                    missing_title,
+                    len(variant_missing),
+                    piece_count=missing_pieces,
+                    missing=True,
+                ).grid(
+                    row=gallery_row, column=0, columnspan=columns, sticky="ew", pady=(0 if gallery_row == 0 else 10, 12)
+                )
+                gallery_row += 1
+                for index, record in enumerate(variant_missing):
+                    column = index % columns
+                    self._gallery_tasks.append(
+                        (lambda selected=record: self._make_missing_card(selected), gallery_row + index // columns, column, columns)
+                    )
+                gallery_row += (len(variant_missing) + columns - 1) // columns
+        for theme in themes:
+            theme_rows = groups[theme]
+            if theme.casefold().startswith("speed champions"):
+                theme_rows.sort(key=self._speed_row_sort_key)
+            else:
+                theme_rows.sort(key=lambda row: str(row["title"] or "").casefold())
+            section_built = sum(bool(int(row["built"] or 0)) for row in theme_rows)
+            section_pieces = sum(self._row_piece_count(row) for row in theme_rows)
+            self._make_theme_header(
+                theme,
+                len(theme_rows),
+                built_count=section_built,
+                piece_count=section_pieces,
+            ).grid(
+                row=gallery_row, column=0, columnspan=columns, sticky="ew", pady=(10 if gallery_row else 0, 12)
+            )
+            gallery_row += 1
+            for index, row in enumerate(theme_rows):
+                column = index % columns
+                self._gallery_tasks.append(
+                    (lambda selected=row: self._make_set_card(selected), gallery_row + index // columns, column, columns)
+                )
+            gallery_row += (len(theme_rows) + columns - 1) // columns
+        self._render_gallery_batch(generation)
+
+    def _render_gallery_batch(self, generation: int) -> None:
+        if generation != self._gallery_generation:
+            return
+        batch, self._gallery_tasks = self._gallery_tasks[:2], self._gallery_tasks[2:]
+        for factory, row, column, columns in batch:
+            factory().grid(
+                row=row, column=column, sticky="nsew",
+                padx=(0 if column == 0 else 7, 0 if column == columns - 1 else 7),
+                pady=(0, 14),
+            )
+        if self._gallery_tasks:
+            self.after(30, self._render_gallery_batch, generation)
+
+    def _cleanup_retired_gallery(self) -> None:
+        self._gallery_cleanup_job = None
+        if not self._retired_galleries:
+            return
+        gallery, children = self._retired_galleries[0]
+        if children:
+            child = children.pop()
+            try:
+                child.destroy()
+            except tk.TclError:
+                pass
+        else:
+            try:
+                gallery.destroy()
+            except tk.TclError:
+                pass
+            self._retired_galleries.pop(0)
+        if self._retired_galleries:
+            self._gallery_cleanup_job = self.after(30, self._cleanup_retired_gallery)
+
+    def _make_theme_header(
+        self,
+        theme: str,
+        count: int,
+        built_count: int | None = None,
+        piece_count: int = 0,
+        missing: bool = False,
+    ) -> tk.Frame:
+        header = tk.Frame(self.gallery, bg=COLORS["paper"])
+        title = tk.Frame(header, bg=COLORS["paper"])
+        title.pack(side="left")
+        accent = COLORS["danger"] if missing else COLORS["accent"]
+        tk.Frame(title, bg=accent, width=4, height=26).pack(side="left", padx=(0, 11))
+        tk.Label(title, text=theme.upper(), bg=COLORS["paper"], fg=COLORS["ink"],
+                 font=(FONT, 12, "bold")).pack(side="left")
+        suffix = "SET" if count == 1 else "SETS"
+        tk.Label(title, text=f"{count} {suffix}", bg=COLORS["danger_bg"] if missing else COLORS["heading"], fg=accent,
+                 font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left", padx=11)
+        if built_count is not None:
+            tk.Label(title, text=f"{built_count:,} BUILT", bg=COLORS["heading"], fg=COLORS["ink"],
+                     font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left", padx=(0, 7))
+        tk.Label(title, text=f"{piece_count:,} PIECES", bg=COLORS["heading"], fg=COLORS["muted"],
+                 font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left")
+        tk.Frame(header, bg=COLORS["line"], height=1).pack(side="left", fill="x", expand=True, padx=(14, 0))
+        return header
+
+    def _make_missing_card(self, record: CatalogSet) -> tk.Frame:
+        card = tk.Frame(self.gallery, bg=COLORS["card"], highlightbackground=COLORS["danger_bg"], highlightthickness=1)
+        image_label = tk.Label(card, text="IMAGE LOADING", bg=COLORS["card"], fg=COLORS["muted"],
+                               font=(FONT, 8, "bold"), width=30, height=9)
+        image_label.pack(fill="x")
+        body = tk.Frame(card, bg=COLORS["card"])
+        body.pack(fill="both", expand=True, padx=14, pady=12)
+        top = tk.Frame(body, bg=COLORS["card"])
+        top.pack(fill="x")
+        tk.Label(top, text=record.set_number, bg=COLORS["card"], fg=COLORS["accent"],
+                 font=(FONT, 8, "bold")).pack(side="left")
+        tk.Label(top, text="MISSING", bg=COLORS["danger_bg"], fg=COLORS["danger"],
+                 font=(FONT, 7, "bold"), padx=7, pady=2).pack(side="right")
+        tk.Label(body, text=record.name, bg=COLORS["card"], fg=COLORS["ink"],
+                 font=(FONT, 10, "bold"), anchor="w", justify="left", wraplength=225, height=2).pack(fill="x", pady=(4, 3))
+        tk.Label(body, text=f"{record.year}  ·  {record.parts} pieces", bg=COLORS["card"], fg=COLORS["muted"],
+                 font=(FONT, 8), anchor="w").pack(fill="x")
+        footer = tk.Frame(body, bg=COLORS["card"])
+        footer.pack(fill="x", pady=(10, 0))
+        tk.Label(footer, text="NOT IN COLLECTION", bg=COLORS["card"], fg=COLORS["danger"],
+                 font=(FONT, 8, "bold")).pack(side="left")
+        add = button(footer, "+ Add", lambda selected=record: self.add_catalog_set(selected), "primary")
+        add.configure(font=(FONT, 8, "bold"), padx=10, pady=5)
+        add.pack(side="right")
+        if record.image_url:
+            self._register_lazy_image(image_label, record.set_number, record.image_url)
+        else:
+            image_label.configure(text="IMAGE UNAVAILABLE")
+        return card
+
+    def _make_set_card(self, row: Any) -> tk.Frame:
+        card = tk.Frame(self.gallery, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1)
+        image_label = tk.Label(card, text="IMAGE LOADING", bg=COLORS["card"], fg=COLORS["muted"],
+                               font=(FONT, 8, "bold"), width=30, height=9)
+        image_label.pack(fill="x")
+        catalog_set = self.app.catalog.lookup(str(row["set_number"]))
+        body = tk.Frame(card, bg=COLORS["card"])
+        body.pack(fill="both", expand=True, padx=14, pady=12)
+        top = tk.Frame(body, bg=COLORS["card"])
+        top.pack(fill="x")
+        tk.Label(top, text=str(row["set_number"]), bg=COLORS["card"], fg=COLORS["accent"],
+                 font=(FONT, 8, "bold")).pack(side="left")
+        built = bool(int(row["built"] or 0))
+        tk.Label(top, text="BUILT" if built else "NOT BUILT",
+                 bg=COLORS["success_bg"] if built else COLORS["heading"],
+                 fg=COLORS["accent"] if built else COLORS["muted"],
+                 font=(FONT, 7, "bold"), padx=7, pady=2).pack(side="right")
+        tk.Label(body, text=str(row["title"]), bg=COLORS["card"], fg=COLORS["ink"],
+                 font=(FONT, 10, "bold"), anchor="w", justify="left", wraplength=225, height=2).pack(fill="x", pady=(4, 3))
+        meta = f"{catalog_set.year}  ·  {catalog_set.parts} pieces" if catalog_set else "Catalogue details unavailable"
+        tk.Label(body, text=meta, bg=COLORS["card"], fg=COLORS["muted"],
+                 font=(FONT, 8), anchor="w").pack(fill="x")
+        footer = tk.Frame(body, bg=COLORS["card"])
+        footer.pack(fill="x", pady=(10, 0))
+        tk.Label(footer, text=money(row["estimated_value"]), bg=COLORS["card"], fg=COLORS["ink"],
+                 font=(FONT, 10, "bold")).pack(side="left")
+        edit = button(footer, "Edit", lambda item_id=int(row["id"]): self.edit_set(item_id), "soft")
+        edit.configure(font=(FONT, 8, "bold"), padx=10, pady=5)
+        edit.pack(side="right")
+
+        if catalog_set and catalog_set.image_url:
+            self._register_lazy_image(image_label, catalog_set.set_number, catalog_set.image_url)
+        else:
+            image_label.configure(text="IMAGE UNAVAILABLE")
+        return card
+
+    def _apply_image(self, target: tk.Label, image: Any) -> None:
+        if image is None:
+            if target.winfo_exists():
+                target.configure(text="IMAGE UNAVAILABLE")
+            return
+        try:
+            if not target.winfo_exists():
+                return
+            photo = ImageTk.PhotoImage(image)
+            self._photos.append(photo)
+            target.configure(image=photo, text="", width=250, height=155)
+        except tk.TclError:
+            pass
+
+    def _update_scroll_region(self, _event: tk.Event) -> None:
+        self.gallery_canvas.configure(scrollregion=self.gallery_canvas.bbox("all"))
+        self._schedule_visible_images()
+
+    def _resize_gallery(self, event: tk.Event) -> None:
+        self.gallery_canvas.itemconfigure(self.gallery_window, width=event.width)
+        desired = self._desired_columns(event.width)
+        if desired != self._gallery_columns:
+            if self._reflow_job is not None:
+                try:
+                    self.after_cancel(self._reflow_job)
+                except tk.TclError:
+                    pass
+            self._reflow_job = self.after(180, self._reflow_gallery)
+        self._schedule_visible_images()
+
+    @staticmethod
+    def _desired_columns(width: int) -> int:
+        return max(2, min(7, max(width, 1) // 285))
+
+    def _reflow_gallery(self) -> None:
+        self._reflow_job = None
+        desired = self._desired_columns(self.gallery_canvas.winfo_width())
+        if desired == self._gallery_columns:
+            return
+        self._gallery_columns = desired
+        self._gallery_signature = None
+        self.refresh()
+
+    def _register_lazy_image(self, target: tk.Label, set_number: str, image_url: str) -> None:
+        self._lazy_images[target] = (set_number, image_url)
+        self._schedule_visible_images()
+
+    def _schedule_visible_images(self) -> None:
+        if self._lazy_image_job is None:
+            self._lazy_image_job = self.after(35, self._load_visible_images)
+
+    def _load_visible_images(self) -> None:
+        self._lazy_image_job = None
+        if not self._lazy_images or not self.gallery_canvas.winfo_ismapped():
+            return
+        canvas_top = self.gallery_canvas.winfo_rooty()
+        canvas_height = max(self.gallery_canvas.winfo_height(), 1)
+        preload = canvas_height
+        visible_top = canvas_top - preload
+        visible_bottom = canvas_top + canvas_height + preload
+        requested = 0
+        more_visible = False
+        for target, request in list(self._lazy_images.items()):
+            try:
+                if not target.winfo_exists():
+                    self._lazy_images.pop(target, None)
+                    continue
+                if not target.winfo_ismapped():
+                    continue
+                target_top = target.winfo_rooty()
+                target_bottom = target_top + max(target.winfo_height(), 1)
+            except tk.TclError:
+                self._lazy_images.pop(target, None)
+                continue
+            if target_bottom < visible_top or target_top > visible_bottom:
+                continue
+            if requested >= 2:
+                more_visible = True
+                continue
+            set_number, image_url = self._lazy_images.pop(target)
+            self.app.image_cache.request(
+                set_number,
+                image_url,
+                lambda image, image_target=target: self._apply_image(image_target, image),
+            )
+            requested += 1
+        if more_visible:
+            self._lazy_image_job = self.after(45, self._load_visible_images)
+
+    def _scroll_gallery(self, *args: str) -> None:
+        self.gallery_canvas.yview(*args)
+        self._schedule_visible_images()
+
+    def _bind_wheel(self, _event: tk.Event) -> None:
+        self.gallery_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _unbind_wheel(self, _event: tk.Event) -> None:
+        self.gallery_canvas.unbind_all("<MouseWheel>")
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        self.gallery_canvas.yview_scroll(int(-event.delta / 120), "units")
+        self._schedule_visible_images()
 
 
 class SalesPage(BasePage):
@@ -628,13 +1250,13 @@ class SalesPage(BasePage):
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self.refresh())
 
-        strip = tk.Frame(self, bg=COLORS["ink"])
+        strip = tk.Frame(self, bg=COLORS["black"])
         strip.pack(fill="x", pady=(29, 15))
-        strip_inner = tk.Frame(strip, bg=COLORS["ink"])
+        strip_inner = tk.Frame(strip, bg=COLORS["black"])
         strip_inner.pack(fill="x", padx=22, pady=15)
-        self.sales_stat = tk.Label(strip_inner, text="", bg=COLORS["ink"], fg="#FFFFFF", font=(FONT, 15, "bold"))
+        self.sales_stat = tk.Label(strip_inner, text="", bg=COLORS["black"], fg=COLORS["ink"], font=(FONT, 15, "bold"))
         self.sales_stat.pack(side="left")
-        self.sales_note = tk.Label(strip_inner, text="", bg=COLORS["ink"], fg=COLORS["nav_muted"], font=(FONT, 10))
+        self.sales_note = tk.Label(strip_inner, text="", bg=COLORS["black"], fg=COLORS["nav_muted"], font=(FONT, 10))
         self.sales_note.pack(side="left", padx=17)
 
         toolbar = tk.Frame(self, bg=COLORS["paper"])
@@ -729,7 +1351,7 @@ class SalesPage(BasePage):
 class DataPage(BasePage):
     def __init__(self, parent: tk.Misc, app: BrickLedgerApp) -> None:
         super().__init__(parent, app)
-        header = title_block(self, "Your local archive", "Data that stays yours.", "Export clean records whenever it is time for accounting, insurance, or a fresh spreadsheet.")
+        header = title_block(self, "Your local archive", "Exports, all in one place.", "Create clean records for accounting, insurance, or a fresh spreadsheet.")
         header.pack(anchor="nw")
 
         panels = tk.Frame(self, bg=COLORS["paper"])
@@ -740,12 +1362,12 @@ class DataPage(BasePage):
         self._make_collection_export_settings(collection_card)
         self._make_export_panel(panels, 1, "Sales ledger", "Every sale with fees, postage, platform, and net proceeds.", "Export sales CSV", self.export_sales, COLORS["lavender"])
 
-        importer = tk.Frame(self, bg=COLORS["ink"], highlightbackground=COLORS["ink"], highlightthickness=1)
+        importer = tk.Frame(self, bg=COLORS["black"], highlightbackground=COLORS["line"], highlightthickness=1)
         importer.pack(fill="x", pady=(0, 10))
-        importer_copy = tk.Frame(importer, bg=COLORS["ink"])
+        importer_copy = tk.Frame(importer, bg=COLORS["black"])
         importer_copy.pack(side="left", fill="x", expand=True, padx=21, pady=17)
-        tk.Label(importer_copy, text="BRING IN YOUR BRICKECONOMY COLLECTION", bg=COLORS["ink"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w")
-        tk.Label(importer_copy, text="Preview your Sets export, then choose Keeping or For sale before importing.", bg=COLORS["ink"], fg=COLORS["nav_muted"], font=(FONT, 10)).pack(anchor="w", pady=(4, 0))
+        tk.Label(importer_copy, text="BRING IN YOUR BRICKECONOMY COLLECTION", bg=COLORS["black"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w")
+        tk.Label(importer_copy, text="Preview your Sets export, then choose Keeping or For sale before importing.", bg=COLORS["black"], fg=COLORS["nav_muted"], font=(FONT, 10)).pack(anchor="w", pady=(4, 0))
         button(importer, "Import BrickEconomy CSV", self.import_brickeconomy).pack(side="right", padx=21, pady=21)
 
         sales_importer = tk.Frame(self, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1)
@@ -787,7 +1409,7 @@ class DataPage(BasePage):
         rows = (
             ("Search", self.export_search_var, None),
             ("Status", self.export_status_var, ("All", "Keeping", "For sale", "Parting out", "Sold")),
-            ("Condition", self.export_condition_var, ("All", "New", "Sealed", "Complete", "Used", "Incomplete")),
+            ("Condition", self.export_condition_var, ("All", "Collection", "New", "Sealed", "Used", "Incomplete")),
             ("Built", self.export_built_var, ("All", "Built", "Not built")),
             ("Sort", self.export_sort_var, ("Status then A-Z", "Theme A-Z", "Alphabetical A-Z", "Alphabetical Z-A", "Highest value", "Lowest value", "Newest added", "Oldest added")),
         )
@@ -969,10 +1591,10 @@ class BrickEconomyImportDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _event: self.destroy())
 
     def _build(self) -> None:
-        head = tk.Frame(self, bg=COLORS["ink"])
+        head = tk.Frame(self, bg=COLORS["black"])
         head.pack(fill="x")
-        tk.Label(head, text="BRICKECONOMY IMPORT", bg=COLORS["ink"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=22, pady=(15, 2))
-        tk.Label(head, text="Review before the sets join your ledger.", bg=COLORS["ink"], fg="#FFFFFF", font=(FONT, 16, "bold")).pack(anchor="w", padx=22, pady=(0, 15))
+        tk.Label(head, text="BRICKECONOMY IMPORT", bg=COLORS["black"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=22, pady=(15, 2))
+        tk.Label(head, text="Review before the sets join your ledger.", bg=COLORS["black"], fg=COLORS["ink"], font=(FONT, 16, "bold")).pack(anchor="w", padx=22, pady=(0, 15))
 
         summary = tk.Frame(self, bg=COLORS["paper"])
         summary.pack(fill="x", padx=22, pady=(13, 8))
@@ -1075,10 +1697,10 @@ class CatalogPicker(tk.Toplevel):
         self.bind("<Escape>", lambda _event: self.destroy())
 
     def _build(self) -> None:
-        head = tk.Frame(self, bg=COLORS["ink"])
+        head = tk.Frame(self, bg=COLORS["black"])
         head.pack(fill="x")
-        tk.Label(head, text="OFFLINE SET CATALOGUE", bg=COLORS["ink"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=24, pady=(18, 2))
-        tk.Label(head, text="Choose a set from your Sets folder.", bg=COLORS["ink"], fg="#FFFFFF", font=(FONT, 17, "bold")).pack(anchor="w", padx=24, pady=(0, 18))
+        tk.Label(head, text="OFFLINE SET CATALOGUE", bg=COLORS["black"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=24, pady=(18, 2))
+        tk.Label(head, text="Choose a set from your Sets folder.", bg=COLORS["black"], fg=COLORS["ink"], font=(FONT, 17, "bold")).pack(anchor="w", padx=24, pady=(0, 18))
 
         controls = tk.Frame(self, bg=COLORS["paper"])
         controls.pack(fill="x", padx=24, pady=(19, 11))
@@ -1160,8 +1782,6 @@ class SetDialog(tk.Toplevel):
         self.vars: dict[str, tk.StringVar] = {}
         self.built_var = tk.BooleanVar(value=bool(int(self._value("built", 0))))
         self.disassembled_var = tk.BooleanVar(value=bool(int(self._value("disassembled", 0))))
-        self.box_var = tk.BooleanVar(value=bool(int(self._value("has_box", 0))))
-        self.instructions_var = tk.BooleanVar(value=bool(int(self._value("has_instructions", 0))))
         self._build()
         self.bind("<Escape>", lambda _event: self.destroy())
         self.after(50, lambda: self.focus_force())
@@ -1170,13 +1790,13 @@ class SetDialog(tk.Toplevel):
         return str(self.record[key]) if self.record is not None and self.record[key] is not None else str(fallback)
 
     def _build(self) -> None:
-        head = tk.Frame(self, bg=COLORS["ink"])
+        head = tk.Frame(self, bg=COLORS["black"])
         head.pack(fill="x")
-        heading_copy = tk.Frame(head, bg=COLORS["ink"])
+        heading_copy = tk.Frame(head, bg=COLORS["black"])
         heading_copy.pack(side="left", fill="x", expand=True, padx=26, pady=(14, 14))
-        tk.Label(heading_copy, text="SET CARD", bg=COLORS["ink"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", pady=(0, 2))
+        tk.Label(heading_copy, text="SET CARD", bg=COLORS["black"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", pady=(0, 2))
         heading = "Edit the details that matter." if self.record else "Add a set to your ledger."
-        tk.Label(heading_copy, text=heading, bg=COLORS["ink"], fg="#FFFFFF", font=(FONT, 17, "bold")).pack(anchor="w")
+        tk.Label(heading_copy, text=heading, bg=COLORS["black"], fg=COLORS["ink"], font=(FONT, 17, "bold")).pack(anchor="w")
         button(head, "Cancel", self.destroy, "soft").pack(side="right", padx=(0, 7), pady=18)
         button(head, "Save changes" if self.record else "Add set", self.save).pack(side="right", padx=(0, 7), pady=18)
         form = tk.Frame(self, bg=COLORS["paper"])
@@ -1197,7 +1817,7 @@ class SetDialog(tk.Toplevel):
             var = tk.StringVar(value=self._value(key, fallback))
             self.vars[key] = var
             if key == "condition":
-                field: tk.Widget = ttk.Combobox(cell, textvariable=var, values=("New", "Sealed", "Complete", "Used", "Incomplete"), state="readonly")
+                field: tk.Widget = ttk.Combobox(cell, textvariable=var, values=("Collection", "New", "Sealed", "Used", "Incomplete"), state="readonly")
             elif key == "status":
                 field = ttk.Combobox(cell, textvariable=var, values=("Keeping", "For sale", "Parting out", "Sold"), state="readonly")
             else:
@@ -1224,7 +1844,7 @@ class SetDialog(tk.Toplevel):
         self.notes.insert("1.0", self._value("notes"))
         checks_row = tk.Frame(form, bg=COLORS["paper"])
         checks_row.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 1))
-        for label, variable in (("Built", self.built_var), ("Disassembled", self.disassembled_var), ("Box", self.box_var), ("Instructions", self.instructions_var)):
+        for label, variable in (("Built", self.built_var), ("Disassembled", self.disassembled_var)):
             tk.Checkbutton(checks_row, text=label, variable=variable, bg=COLORS["paper"], fg=COLORS["ink"], activebackground=COLORS["paper"], activeforeground=COLORS["ink"], selectcolor=COLORS["card"], font=(FONT, 10, "bold"), relief="flat").pack(side="left", padx=(0, 14))
         self.geometry("760x620")
 
@@ -1272,8 +1892,10 @@ class SetDialog(tk.Toplevel):
         values["notes"] = self.notes.get("1.0", "end-1c").strip()
         values["built"] = 1 if self.built_var.get() else 0
         values["disassembled"] = 1 if self.disassembled_var.get() else 0
-        values["has_box"] = 1 if self.box_var.get() else 0
-        values["has_instructions"] = 1 if self.instructions_var.get() else 0
+        # Box and instruction inventories are managed on their combined page.
+        # Preserve older flags while editing so hiding the controls never loses data.
+        values["has_box"] = int(self.record["has_box"] or 0) if self.record else 0
+        values["has_instructions"] = int(self.record["has_instructions"] or 0) if self.record else 0
         if self.item_id:
             self.app.db.update_set(self.item_id, values)
         else:
@@ -1336,10 +1958,10 @@ class SaleDialog(tk.Toplevel):
         return f"{float(record['purchase_price']):.2f}"
 
     def _build(self) -> None:
-        head = tk.Frame(self, bg=COLORS["ink"])
+        head = tk.Frame(self, bg=COLORS["black"])
         head.pack(fill="x")
-        tk.Label(head, text="SALE ENTRY", bg=COLORS["ink"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=26, pady=(20, 2))
-        tk.Label(head, text="Enter sale price and item cost.", bg=COLORS["ink"], fg="#FFFFFF", font=(FONT, 17, "bold")).pack(anchor="w", padx=26, pady=(0, 20))
+        tk.Label(head, text="SALE ENTRY", bg=COLORS["black"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=26, pady=(20, 2))
+        tk.Label(head, text="Enter sale price and item cost.", bg=COLORS["black"], fg=COLORS["ink"], font=(FONT, 17, "bold")).pack(anchor="w", padx=26, pady=(0, 20))
         form = tk.Frame(self, bg=COLORS["paper"])
         form.pack(fill="both", expand=True, padx=26, pady=21)
         for column in range(2):
@@ -1477,10 +2099,10 @@ class EditSaleDialog(tk.Toplevel):
         self.after(50, lambda: self.focus_force())
 
     def _build(self) -> None:
-        head = tk.Frame(self, bg=COLORS["ink"])
+        head = tk.Frame(self, bg=COLORS["black"])
         head.pack(fill="x")
-        tk.Label(head, text="EDIT SALE", bg=COLORS["ink"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=26, pady=(20, 2))
-        tk.Label(head, text=self._sale_title(), bg=COLORS["ink"], fg="#FFFFFF", font=(FONT, 17, "bold")).pack(anchor="w", padx=26, pady=(0, 20))
+        tk.Label(head, text="EDIT SALE", bg=COLORS["black"], fg=COLORS["yellow"], font=(FONT, 8, "bold")).pack(anchor="w", padx=26, pady=(20, 2))
+        tk.Label(head, text=self._sale_title(), bg=COLORS["black"], fg=COLORS["ink"], font=(FONT, 17, "bold")).pack(anchor="w", padx=26, pady=(0, 20))
 
         form = tk.Frame(self, bg=COLORS["paper"])
         form.pack(fill="both", expand=True, padx=26, pady=21)

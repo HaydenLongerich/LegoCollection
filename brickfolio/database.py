@@ -117,6 +117,7 @@ class Database:
             if column not in columns:
                 self.connection.execute(f"ALTER TABLE collection ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
         self.connection.execute("UPDATE collection SET condition = 'Used' WHERE condition = 'Used + B&I'")
+        self.connection.execute("UPDATE collection SET condition = 'Collection' WHERE condition = 'Complete'")
         self.connection.commit()
         rows_to_clean = self.connection.execute(
             "SELECT id, notes FROM collection WHERE notes LIKE ? OR notes LIKE ? OR notes LIKE ? OR notes LIKE ? OR notes LIKE ?",
@@ -244,6 +245,8 @@ class Database:
         prepared["quantity"] = 1
         if prepared.get("condition") == "Used + B&I":
             prepared["condition"] = "Used"
+        elif prepared.get("condition") == "Complete":
+            prepared["condition"] = "Collection"
         for column in ("built", "disassembled", "has_box", "has_instructions"):
             prepared[column] = self._truthy(prepared.get(column, 0))
         return prepared

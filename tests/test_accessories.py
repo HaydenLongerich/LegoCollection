@@ -93,6 +93,10 @@ class AccessoryTests(unittest.TestCase):
         self.assertEqual(self.db.accessories("Box"), [])
         self.assertEqual(self.db.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 
+    def test_complete_sets_are_migrated_into_my_collection(self):
+        item_id = self.add_set(condition="Complete")
+        self.assertEqual(self.db.get_set(item_id)["condition"], "Collection")
+
 
 if __name__ == "__main__":
     unittest.main()
