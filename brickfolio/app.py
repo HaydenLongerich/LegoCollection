@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from .catalog import (
 )
 from .brickeconomy import ImportBatch, read_collection_csv
 from .database import Database, EXPORTS_PATH
+from .paths import DATA_PATH
 from .images import SetImageCache
 from .lego_spreadsheet import read_main_sales_spreadsheet
 
@@ -59,6 +61,7 @@ COLORS = {
 }
 
 FONT = "Segoe UI"
+APP_ROOT = Path(__file__).resolve().parent.parent
 
 
 def money(value: float | int) -> str:
@@ -79,6 +82,7 @@ class BrickLedgerApp(tk.Tk):
         self.geometry("1440x900")
         self.minsize(1120, 720)
         self.configure(bg=COLORS["paper"])
+        self._set_app_icon()
         self.db = Database()
         self.catalog = OfflineCatalog()
         self.image_cache = SetImageCache(self)
@@ -93,6 +97,25 @@ class BrickLedgerApp(tk.Tk):
             self.after(0, lambda: self.state("zoomed"))
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page("Overview")
+
+    def _set_app_icon(self) -> None:
+        """Use the BrickLedger logo for this window and every dialog."""
+        icon = APP_ROOT / "assets" / "brickledger.ico"
+        if os.name == "nt" and not getattr(sys, "frozen", False):
+            # Running from `python main.py`: give BrickLedger its own taskbar
+            # button and logo instead of grouping under Python. The exe already
+            # gets its own button, so it keeps Windows' default grouping.
+            try:
+                import ctypes
+
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BrickLedger.Desktop")
+            except (AttributeError, OSError):
+                pass
+        if os.name == "nt" and icon.is_file():
+            try:
+                self.iconbitmap(default=str(icon))
+            except tk.TclError:
+                pass
 
     def _setup_style(self) -> None:
         style = ttk.Style(self)
@@ -1655,7 +1678,7 @@ class DataPage(BasePage):
         BrickEconomyImportDialog(self, self.app, Path(selected), batch)
 
     def open_data_folder(self) -> None:
-        folder = str(EXPORTS_PATH.parent / "data")
+        folder = str(DATA_PATH)
         try:
             if os.name == "nt":
                 os.startfile(folder)  # type: ignore[attr-defined]

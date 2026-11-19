@@ -14,10 +14,11 @@ from urllib.parse import urlparse
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
+from .paths import DATA_PATH, RESOURCE_ROOT
 
-ROOT = Path(__file__).resolve().parent.parent
-IMAGE_CACHE_PATH = ROOT / "data" / "image-cache"
-BUNDLED_IMAGE_PATH = ROOT / "assets" / "set-images"
+
+IMAGE_CACHE_PATH = DATA_PATH / "image-cache"
+BUNDLED_IMAGE_PATH = RESOURCE_ROOT / "assets" / "set-images"
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 THUMBNAIL_SIZE = (250, 155)
 ALLOWED_IMAGE_HOSTS = {"cdn.rebrickable.com"}

@@ -15,12 +15,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .catalog import normalise_theme
+from .paths import DATA_PATH, EXPORTS_PATH
 
 
-ROOT = Path(__file__).resolve().parent.parent
-DATABASE_PATH = ROOT / "data" / "brickledger.db"
-LEGACY_DATABASE_PATH = ROOT / "data" / "studledger.db"
-EXPORTS_PATH = ROOT / "exports"
+DATABASE_PATH = DATA_PATH / "brickledger.db"
+LEGACY_DATABASE_PATH = DATA_PATH / "studledger.db"
 
 COLLECTION_EXPORT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("set_number", "Set #"),

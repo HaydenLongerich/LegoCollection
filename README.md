@@ -1,67 +1,61 @@
 # BrickLedger
 
-A calm, local-first desktop workspace for tracking a LEGO collection and the sets you sell. It stores your records in a SQLite database on your computer - no account or internet connection required.
+I got tired of tracking my LEGO in a spreadsheet so I made this. It keeps track of the sets I own, what I paid, what they're worth, and what I've sold. It's mostly built around my Speed Champions obsession but it works for any theme.
 
-## What is included
+Everything stays on your own computer. No account, no cloud, nothing gets uploaded anywhere.
 
-- Collection catalogue with set details, condition, and pricing
-- Live portfolio figures: paid, estimated value, potential profit, and listed value
-- A sale log that records fees and shipping, then automatically marks the set sold
-- Search and status filters
-- CSV export for the collection and sales history
-- BrickEconomy Sets CSV import with a review screen and a batch Keeping/For sale choice
-- A searchable offline set catalogue backed by your included `Sets` folder
-- Separate Boxes and Instructions inventories with search, sorting, notes, and CSV export
-- A charcoal, white, and teal interface built with Python's standard library
+## Just want to use it?
 
-## Run it
+**[Download BrickLedger.exe](https://github.com/HaydenLongerich/LegoCollection/releases/latest/download/BrickLedger.exe)** and double click it. That's it, you don't need Python or anything else.
 
-1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/) if you do not already have it.
-2. In this folder, run:
+Couple things:
 
-   ```powershell
-   python main.py
-   ```
+- Windows will probably throw a blue "Windows protected your PC" popup the first time because I'm not paying for a code signing certificate lol. Hit **More info** then **Run anyway**.
+- It takes a few seconds to open the first time.
+- If you want it on your taskbar, right click the exe > Show more options > Pin to taskbar.
+- Your stuff gets saved in `%LOCALAPPDATA%\BrickLedger` (paste that into File Explorer if you want to find it). Back that folder up if you care about your data. You can delete or move the exe whenever, your collection stays put.
 
-You can also double-click `run_brickledger.bat` on Windows.
+## What it does
 
-The first launch creates `data/brickledger.db`. Your data stays on this machine. The `exports` folder is used when you export CSV files from the app.
+- Add sets by searching the built in catalogue (pretty much every LEGO set, works offline)
+- Track paid price, estimated value, condition, built/not built, keeping vs for sale
+- Log sales and it works out what you actually made
+- A gallery view of your collection with pictures, plus a Speed Champions completion tracker (6 stud, 8 stud and polybags) so you can see what you're missing
+- Separate lists for loose boxes and instruction manuals
+- Import from a BrickEconomy CSV export so you don't have to type everything in again
+- Export anything to CSV
 
-## How the Sets folder is used
+## Running it from the code
 
-The `Sets` folder is your master reference catalogue. When adding a collection item, select **Browse** next to Set Number to search its set numbers, names, and themes, then choose a matching set to fill the form.
+If you'd rather run it from source or mess with it:
 
-Your own collection and sales records are saved separately in `data/brickledger.db`. Removing a set in BrickLedger only removes it from *your collection*; it never changes the catalogue files in `Sets`.
-
-## Import a BrickEconomy collection
-
-Open **Data & exports**, select **Import BrickEconomy CSV**, and choose your `BrickEconomy-Sets.csv` file. BrickLedger previews the records before anything is added, then lets you import the whole batch as either **Keeping** or **For sale**.
-
-## Boxes and instructions
-
-Open **Boxes** or **Instructions** in the sidebar. Add a record manually or select **Browse sets** in the add/edit window to choose from the offline catalogue. You do not need to own the matching set. Each record has a set number, name, theme, condition, storage location, and notes. Double-click a row to edit it, or select it and use **Edit** or **Delete**.
-
-Use **Copy checked sets** to bring across collection entries with the matching Box or Instructions checkbox ticked. This includes checked sold sets. Previously copied entries are skipped, and existing accessory details are preserved. Copies start with condition **Good**; update that to the actual condition of the box or booklet. They have their own notes and location.
-
-These inventories are independent after copying: editing, selling, deleting, or unticking a set does not remove its box or instructions record. Deleting an accessory does not untick the set; copying checked sets again can re-add it. Each record represents one box or instruction booklet/set of booklets. Extra copies can be added separately.
-
-Search matches set details, condition, storage location, and notes. **Theme A-Z** orders themes alphabetically and names alphabetically within each theme. **Export CSV** saves the current search results in the selected order. Both inventories are stored in the same local SQLite database as your collection and sales, and do not change the dashboard's set values.
-
-## Verification
-
-Run the inventory checks with `python -m unittest discover -s tests -v`.
-
-## Project layout
-
-```
-main.py                 Application entry point
-brickfolio/             Interface and database code
-data/                   Local SQLite database (created automatically)
-exports/                CSV exports
+```powershell
+git clone https://github.com/HaydenLongerich/LegoCollection.git
+cd LegoCollection
+pip install -r requirements.txt
+python main.py
 ```
 
-No third-party packages are required. BrickLedger uses Tkinter, the desktop UI
-component included with normal Python installers. If `python main.py` reports
-that it cannot find `init.tcl`, rerun the official Python installer and choose
-**Modify -> tcl/tk and IDLE**; this computer's current Python installation is
-missing that optional component.
+You need Python 3.10+. If it complains about `init.tcl`, rerun the Python installer, pick Modify and tick "tcl/tk and IDLE".
+
+When you run it this way your data goes in the `data` folder inside the repo instead. That folder is gitignored so you won't accidentally push your collection.
+
+### Building the exe yourself
+
+```powershell
+.\tools\build_exe.ps1 -Release
+```
+
+That spits out a standalone `dist\BrickLedger.exe` (the one that goes on the releases page).
+
+Running it without `-Release` makes a `BrickLedger.exe` in the main folder that just runs whatever code is sitting next to it. That's what I use day to day since it picks up changes without rebuilding. It only needs a rebuild if the tests say a new import is missing, or if the logo or `tools\launcher.py` changes.
+
+### Tests
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+## Credits
+
+Set data and images come from [Rebrickable](https://rebrickable.com). LEGO is a trademark of the LEGO Group, who have nothing to do with this.
