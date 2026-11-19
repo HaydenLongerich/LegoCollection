@@ -97,6 +97,28 @@ class AccessoryTests(unittest.TestCase):
         item_id = self.add_set(condition="Complete")
         self.assertEqual(self.db.get_set(item_id)["condition"], "Collection")
 
+    def test_recent_activity_returns_every_movement_with_financial_details(self):
+        first = self.add_set(set_number="10300-1", title="Time Machine", purchase_price=100,
+                             estimated_value=150, built=1, status="Keeping")
+        self.add_set(set_number="76915-1", title="Pagani Utopia", purchase_price=40,
+                     estimated_value=35, status="For sale")
+        sale_id = self.db.record_sale({
+            "collection_id": first,
+            "platform": "BrickLink",
+            "sold_price": 180,
+            "fees": 15,
+            "shipping": 10,
+            "sold_on": "2026-11-03",
+        })
+
+        activity = self.db.recent_activity()
+        self.assertEqual(len(activity), 3)
+        sale = next(row for row in activity if row["kind"] == "sale" and row["id"] == sale_id)
+        added = next(row for row in activity if row["kind"] == "set" and row["set_number"] == "76915-1")
+        self.assertEqual((sale["amount"], sale["value"], sale["context"]), (180, 155, "BrickLink"))
+        self.assertEqual((added["amount"], added["value"], added["status"]), (40, 35, "For sale"))
+        self.assertEqual(len(self.db.recent_activity(limit=2)), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

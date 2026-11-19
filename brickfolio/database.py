@@ -332,6 +332,8 @@ class Database:
             "Alphabetical Z-A": "title COLLATE NOCASE DESC, set_number COLLATE NOCASE ASC",
             "Status then A-Z": "status = 'Sold', status COLLATE NOCASE ASC, title COLLATE NOCASE ASC",
             "Theme A-Z": "theme COLLATE NOCASE ASC, title COLLATE NOCASE ASC, set_number COLLATE NOCASE ASC",
+            "Highest paid": "purchase_price DESC, title COLLATE NOCASE ASC",
+            "Lowest paid": "purchase_price ASC, title COLLATE NOCASE ASC",
             "Highest value": "estimated_value DESC, title COLLATE NOCASE ASC",
             "Lowest value": "estimated_value ASC, title COLLATE NOCASE ASC",
             "Newest added": "created_at DESC, id DESC",
@@ -487,7 +489,8 @@ class Database:
               COALESCE(SUM(quantity), 0) AS piecesets,
               COALESCE(SUM(purchase_price * quantity), 0) AS paid,
               COALESCE(SUM(estimated_value * quantity), 0) AS value,
-              COALESCE(SUM(CASE WHEN status = 'For sale' THEN estimated_value * quantity ELSE 0 END), 0) AS listed
+              COALESCE(SUM(CASE WHEN status = 'For sale' THEN estimated_value * quantity ELSE 0 END), 0) AS listed,
+              COALESCE(SUM(CASE WHEN status = 'For sale' THEN purchase_price * quantity ELSE 0 END), 0) AS listed_paid
             FROM collection WHERE status != 'Sold'
             """
         ).fetchone()
@@ -504,25 +507,31 @@ class Database:
             "paid": float(row["paid"]),
             "value": float(row["value"]),
             "listed": float(row["listed"]),
+            "listed_paid": float(row["listed_paid"]),
             "net_sales": float(sales["net_sales"]),
             "sales_count": int(sales["sales_count"]),
         }
 
-    def recent_activity(self, limit: int = 5) -> list[sqlite3.Row]:
-        return self.connection.execute(
-            """
+    def recent_activity(self, limit: int | None = None) -> list[sqlite3.Row]:
+        query = """
             SELECT * FROM (
-                SELECT 'set' AS kind, id, title AS label, set_number AS detail, created_at AS happened_at,
-                       estimated_value AS amount
+                SELECT 'set' AS kind, id, set_number, title, theme, condition, status, built, quantity,
+                       created_at AS happened_at, purchase_price AS amount, estimated_value AS value,
+                       '' AS context
                 FROM collection
                 UNION ALL
-                SELECT 'sale' AS kind, sales.id, COALESCE(collection.title, 'Standalone sale') AS label,
-                       platform AS detail, sold_on AS happened_at, sold_price - fees - shipping AS amount
+                SELECT 'sale' AS kind, sales.id, COALESCE(collection.set_number, ''),
+                       COALESCE(collection.title, 'Standalone sale'), COALESCE(collection.theme, ''),
+                       COALESCE(collection.condition, ''), 'Sold', COALESCE(collection.built, 0), 1,
+                       sold_on, sold_price, sold_price - fees - shipping, platform
                 FROM sales LEFT JOIN collection ON collection.id = sales.collection_id
-            ) ORDER BY happened_at DESC, id DESC LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+            ) ORDER BY happened_at DESC, id DESC
+        """
+        parameters: tuple[int, ...] = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters = (limit,)
+        return self.connection.execute(query, parameters).fetchall()
 
     def export_collection(
         self,

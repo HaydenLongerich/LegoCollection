@@ -121,11 +121,6 @@ class BrickLedgerApp(tk.Tk):
                         arrowcolor=COLORS["muted"], bordercolor=COLORS["paper"],
                         lightcolor=COLORS["line"], darkcolor=COLORS["line"])
         style.map("TScrollbar", background=[("active", COLORS["muted"])])
-        style.configure("Activity.TNotebook", background=COLORS["card"], borderwidth=0)
-        style.configure("Activity.TNotebook.Tab", background=COLORS["heading"], foreground=COLORS["muted"],
-                        font=(FONT, 10, "bold"), padding=(12, 9))
-        style.map("Activity.TNotebook.Tab", background=[("selected", COLORS["selection"])],
-                  foreground=[("selected", COLORS["ink"])])
         self.option_add("*TCombobox*Listbox.background", COLORS["card"])
         self.option_add("*TCombobox*Listbox.foreground", COLORS["ink"])
         self.option_add("*TCombobox*Listbox.selectBackground", COLORS["selection"])
@@ -314,7 +309,7 @@ class OverviewPage(BasePage):
         super().__init__(parent, app)
         header_row = tk.Frame(self, bg=COLORS["paper"])
         header_row.pack(fill="x")
-        header = title_block(header_row, "Your bricks, in focus", "A clearer view of the collection.", "What you own, what it is worth, and what is ready to move.")
+        header = title_block(header_row, "Your bricks, in focus", "A clearer view of the collection.", "What you own, what you paid, and what is ready to move.")
         header.pack(side="left", anchor="nw")
         actions = tk.Frame(header_row, bg=COLORS["paper"])
         actions.pack(side="right", anchor="ne", pady=(13, 0))
@@ -327,9 +322,9 @@ class OverviewPage(BasePage):
             cards.columnconfigure(column, weight=1, uniform="metric")
         self.cards: list[MetricCard] = []
         for index, values in enumerate((
-            ("Collection value", COLORS["yellow"], "Based on your estimates"),
+            ("Collection paid", COLORS["yellow"], "What you paid for sets on hand"),
             ("Potential gain", COLORS["sage"], "Value less your cost"),
-            ("Ready to sell", COLORS["blue"], "Estimated value of active listings"),
+            ("Ready to sell", COLORS["blue"], "What you paid for active listings"),
             ("Sales net", COLORS["lavender"], "After fees and shipping"),
         )):
             card = MetricCard(cards, *values)
@@ -354,12 +349,25 @@ class OverviewPage(BasePage):
 
         activity = tk.Frame(lower, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1)
         activity.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
-        tabs = ttk.Notebook(activity, style="Activity.TNotebook", width=1, height=1)
-        tabs.pack(fill="both", expand=True, padx=12, pady=12)
-        recent_sales = tk.Frame(tabs, bg=COLORS["card"])
-        movement = tk.Frame(tabs, bg=COLORS["card"])
-        tabs.add(recent_sales, text="Recent sales")
-        tabs.add(movement, text="Recent movement")
+        activity_body = tk.Frame(activity, bg=COLORS["card"])
+        activity_body.pack(fill="both", expand=True, padx=12, pady=12)
+        activity_tabs = tk.Frame(activity_body, bg=COLORS["card"])
+        activity_tabs.pack(fill="x", pady=(0, 10))
+        self.activity_tab_buttons: dict[str, tk.Button] = {}
+        for label in ("Recent sales", "Recent movement"):
+            tab = tk.Button(
+                activity_tabs, text=label, command=lambda selected=label: self.show_activity_tab(selected),
+                bg=COLORS["heading"], fg=COLORS["muted"], activebackground=COLORS["selection"],
+                activeforeground=COLORS["ink"], relief="flat", bd=0, highlightthickness=0,
+                font=(FONT, 9, "bold"), padx=13, pady=9, cursor="hand2",
+            )
+            tab.pack(side="left", padx=(0, 4))
+            self.activity_tab_buttons[label] = tab
+        self.activity_content = tk.Frame(activity_body, bg=COLORS["card"])
+        self.activity_content.pack(fill="both", expand=True)
+        recent_sales = tk.Frame(self.activity_content, bg=COLORS["card"])
+        movement = tk.Frame(self.activity_content, bg=COLORS["card"])
+        self.activity_tabs = {"Recent sales": recent_sales, "Recent movement": movement}
         self.recent_sales_note = tk.Label(recent_sales, bg=COLORS["card"], fg=COLORS["muted"], font=(FONT, 9), anchor="w")
         self.recent_sales_note.pack(fill="x", padx=8, pady=10)
         button(recent_sales, "View all sales", self.open_sales_history, "soft").pack(side="bottom", anchor="e", padx=8, pady=(8, 0))
@@ -381,8 +389,62 @@ class OverviewPage(BasePage):
         self.recent_sales_tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
         self.recent_sales_tree.bind("<Double-1>", self.open_recent_sale)
         self.recent_sales_tree.bind("<Return>", self.open_recent_sale)
-        self.activity_list = tk.Frame(movement, bg=COLORS["card"])
-        self.activity_list.pack(fill="both", expand=True, padx=22, pady=(13, 18))
+        self.activity_note = tk.Label(movement, bg=COLORS["card"], fg=COLORS["muted"],
+                                      font=(FONT, 9), anchor="w")
+        self.activity_note.pack(fill="x", padx=8, pady=(0, 10))
+        movement_table = tk.Frame(movement, bg=COLORS["card"])
+        movement_table.pack(fill="both", expand=True)
+        movement_columns = ("date", "action", "set", "details", "amount", "value")
+        self.activity_tree = ttk.Treeview(
+            movement_table, columns=movement_columns, show="headings", selectmode="browse", height=8
+        )
+        for key, label, width, anchor, stretch in (
+            ("date", "WHEN", 125, "w", False),
+            ("action", "MOVE", 65, "w", False),
+            ("set", "SET", 210, "w", True),
+            ("details", "DETAILS", 290, "w", True),
+            ("amount", "PURCHASE / SOLD", 115, "e", False),
+            ("value", "VALUE / NET", 105, "e", False),
+        ):
+            self.activity_tree.heading(key, text=label, anchor=anchor)
+            self.activity_tree.column(key, width=width, minwidth=width, anchor=anchor, stretch=stretch)
+        self.activity_tree.grid(row=0, column=0, sticky="nsew")
+        movement_vertical = ttk.Scrollbar(movement_table, orient="vertical", command=self.activity_tree.yview)
+        movement_vertical.grid(row=0, column=1, sticky="ns")
+        movement_horizontal = ttk.Scrollbar(movement_table, orient="horizontal", command=self.activity_tree.xview)
+        movement_horizontal.grid(row=1, column=0, sticky="ew")
+        movement_table.columnconfigure(0, weight=1)
+        movement_table.rowconfigure(0, weight=1)
+        self.activity_tree.configure(yscrollcommand=movement_vertical.set, xscrollcommand=movement_horizontal.set)
+        self.activity_tree.bind("<Double-1>", self.open_recent_movement)
+        self.activity_tree.bind("<Return>", self.open_recent_movement)
+        self.show_activity_tab("Recent sales")
+
+    def show_activity_tab(self, selected: str) -> None:
+        for label, frame in self.activity_tabs.items():
+            frame.pack_forget()
+            active = label == selected
+            self.activity_tab_buttons[label].configure(
+                bg=COLORS["selection"] if active else COLORS["heading"],
+                fg=COLORS["accent"] if active else COLORS["muted"],
+            )
+        self.activity_tabs[selected].pack(fill="both", expand=True)
+
+    def open_recent_movement(self, _event: tk.Event | None = None) -> None:
+        selection = self.activity_tree.selection()
+        if not selection:
+            return
+        kind, item_id = selection[0].split(":", 1)
+        if kind == "sale":
+            self.open_sales_history(item_id)
+            return
+        self.app.show_page("All Sets")
+        page = self.app.pages["All Sets"]
+        if page.tree.exists(item_id):
+            page.tree.selection_set(item_id)
+            page.tree.focus(item_id)
+            page.tree.see(item_id)
+            page.update_actions()
 
     def open_sales_history(self, sale_id: str | None = None) -> None:
         self.app.show_page("Sales")
@@ -409,9 +471,9 @@ class OverviewPage(BasePage):
         metrics = self.app.db.dashboard_metrics()
         gain = float(metrics["value"]) - float(metrics["paid"])
         margin = (gain / float(metrics["paid"]) * 100) if metrics["paid"] else 0
-        self.cards[0].set(short_money(metrics["value"]), f"Across {metrics['piecesets']} set{'' if metrics['piecesets'] == 1 else 's'} on hand")
+        self.cards[0].set(short_money(metrics["paid"]), f"Across {metrics['piecesets']} set{'' if metrics['piecesets'] == 1 else 's'} on hand · est. value {short_money(metrics['value'])}")
         self.cards[1].set(short_money(gain), f"{margin:+.1f}% against your cost")
-        self.cards[2].set(short_money(metrics["listed"]), "Sets currently marked for sale")
+        self.cards[2].set(short_money(metrics["listed_paid"]), f"Sets marked for sale · est. value {short_money(metrics['listed'])}")
         self.cards[3].set(short_money(metrics["net_sales"]), f"From {metrics['sales_count']} recorded sale{'' if metrics['sales_count'] == 1 else 's'}")
         self.item_count.configure(text=f"{metrics['items']} catalogue entries")
 
@@ -445,24 +507,38 @@ class OverviewPage(BasePage):
             tk.Label(labels, text=note, bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT, 8)).pack(anchor="w")
             tk.Label(row, text=money(value), bg=COLORS["paper"], fg=COLORS["ink"], font=(FONT, 11, "bold")).pack(side="right", padx=14)
 
-        for child in self.activity_list.winfo_children():
-            child.destroy()
         activity = self.app.db.recent_activity()
+        selected_activity = self.activity_tree.selection()
+        for item in self.activity_tree.get_children():
+            self.activity_tree.delete(item)
         if not activity:
-            tk.Label(self.activity_list, text="Your workbench is clear.\nAdd your first set to begin.", justify="left", bg=COLORS["card"], fg=COLORS["muted"], font=(FONT, 10)).pack(anchor="w", pady=15)
+            self.activity_note.configure(text="No movement yet. Add your first set to begin.")
             return
-        for index, event in enumerate(activity):
-            row = tk.Frame(self.activity_list, bg=COLORS["card"])
-            row.pack(fill="x", pady=7)
-            symbol = "SALE" if event["kind"] == "sale" else "ADD"
-            bg = COLORS["lavender"] if event["kind"] == "sale" else COLORS["blue"]
-            fg = COLORS["lavender_ink"] if event["kind"] == "sale" else COLORS["blue_ink"]
-            tk.Label(row, text=symbol, width=3, bg=bg, fg=fg, font=(FONT, 11, "bold"), pady=3).pack(side="left")
-            text = tk.Frame(row, bg=COLORS["card"])
-            text.pack(side="left", padx=10, fill="x", expand=True)
-            tk.Label(text, text=event["label"], bg=COLORS["card"], fg=COLORS["ink"], font=(FONT, 9, "bold"), anchor="w").pack(fill="x")
-            tk.Label(text, text=f"{event['detail']} - {'Sold' if event['kind'] == 'sale' else 'Added'}", bg=COLORS["card"], fg=COLORS["muted"], font=(FONT, 8), anchor="w").pack(fill="x")
-            tk.Label(row, text=money(event["amount"]), bg=COLORS["card"], fg=COLORS["sage_ink"] if event["kind"] == "sale" else COLORS["ink"], font=(FONT, 9, "bold")).pack(side="right")
+        self.activity_note.configure(text=f"All {len(activity):,} movements · newest first · double-click to open")
+        for event in activity:
+            is_sale = event["kind"] == "sale"
+            set_label = f"{event['set_number']} · {event['title']}" if event["set_number"] else event["title"]
+            if is_sale:
+                details = " · ".join(value for value in (event["context"], "Sold", event["theme"]) if value)
+            else:
+                built = "Built" if int(event["built"] or 0) else "Not built"
+                quantity = f"Qty {event['quantity']}" if int(event["quantity"] or 1) > 1 else ""
+                details = " · ".join(
+                    value for value in (event["status"], event["condition"], built, event["theme"], quantity) if value
+                )
+            self.activity_tree.insert(
+                "", "end", iid=f"{event['kind']}:{event['id']}",
+                values=(
+                    str(event["happened_at"]),
+                    "SALE" if is_sale else "ADD",
+                    set_label,
+                    details,
+                    money(event["amount"]),
+                    money(event["value"]),
+                ),
+            )
+        if selected_activity and self.activity_tree.exists(selected_activity[0]):
+            self.activity_tree.selection_set(selected_activity[0])
 
 
 class CollectionPage(BasePage):
@@ -575,12 +651,13 @@ class CollectionPage(BasePage):
     def refresh_sections(self) -> None:
         for status, section in self.section_buttons.items():
             records = self.app.db.collection(status=status, condition=self.condition_filter)
+            total_paid = sum(float(record["purchase_price"]) * int(record["quantity"]) for record in records)
             total_value = sum(float(record["estimated_value"]) * int(record["quantity"]) for record in records)
             detail = getattr(section, "_detail")
             accent = getattr(section, "_accent")
             active = self.status_var.get() == status
             section.configure(
-                text=f"{status.upper()}\n{len(records)} set{'' if len(records) == 1 else 's'} - {short_money(total_value)}\n{detail}",
+                text=f"{status.upper()}\n{len(records)} set{'' if len(records) == 1 else 's'} - Paid {short_money(total_paid)} · Worth {short_money(total_value)}\n{detail}",
                 bg=COLORS["success_bg"] if active and status == "Keeping" else COLORS["warning_bg"] if active else COLORS["card"],
                 highlightbackground=accent if active else COLORS["line"],
                 highlightthickness=2 if active else 1,
@@ -672,6 +749,10 @@ class MyCollectionPage(BasePage):
             header_actions, text="", bg=COLORS["paper"], fg=COLORS["muted"], font=(FONT, 9, "bold")
         )
         self.collection_totals.pack(anchor="e", pady=(10, 0))
+        self.collection_money = tk.Label(
+            header_actions, text="", bg=COLORS["paper"], fg=COLORS["accent"], font=(FONT, 9, "bold")
+        )
+        self.collection_money.pack(anchor="e", pady=(4, 0))
 
         progress = tk.Frame(self, bg=COLORS["card"], highlightbackground=COLORS["line"], highlightthickness=1)
         progress.pack(fill="x", pady=(25, 17))
@@ -801,6 +882,11 @@ class MyCollectionPage(BasePage):
         total_pieces = sum(self._row_piece_count(row) for row in all_collection)
         self.collection_totals.configure(
             text=f"{len(all_collection):,} SETS   ·   {total_built:,} BUILT   ·   {total_pieces:,} PIECES"
+        )
+        total_paid = sum(float(row["purchase_price"] or 0) * int(row["quantity"] or 1) for row in all_collection)
+        total_value = sum(float(row["estimated_value"] or 0) * int(row["quantity"] or 1) for row in all_collection)
+        self.collection_money.configure(
+            text=f"PAID {money(total_paid)}   ·   WORTH {money(total_value)}"
         )
 
     def _schedule_refresh(self) -> None:
@@ -989,6 +1075,8 @@ class MyCollectionPage(BasePage):
                 len(theme_rows),
                 built_count=section_built,
                 piece_count=section_pieces,
+                paid=sum(float(row["purchase_price"] or 0) * int(row["quantity"] or 1) for row in theme_rows),
+                worth=sum(float(row["estimated_value"] or 0) * int(row["quantity"] or 1) for row in theme_rows),
             ).grid(
                 row=gallery_row, column=0, columnspan=columns, sticky="ew", pady=(10 if gallery_row else 0, 12)
             )
@@ -1041,6 +1129,8 @@ class MyCollectionPage(BasePage):
         built_count: int | None = None,
         piece_count: int = 0,
         missing: bool = False,
+        paid: float | None = None,
+        worth: float | None = None,
     ) -> tk.Frame:
         header = tk.Frame(self.gallery, bg=COLORS["paper"])
         title = tk.Frame(header, bg=COLORS["paper"])
@@ -1057,6 +1147,12 @@ class MyCollectionPage(BasePage):
                      font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left", padx=(0, 7))
         tk.Label(title, text=f"{piece_count:,} PIECES", bg=COLORS["heading"], fg=COLORS["muted"],
                  font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left")
+        if paid is not None:
+            tk.Label(title, text=f"PAID {money(paid)}", bg=COLORS["heading"], fg=COLORS["accent"],
+                     font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left", padx=(7, 0))
+        if worth is not None:
+            tk.Label(title, text=f"WORTH {money(worth)}", bg=COLORS["heading"], fg=COLORS["ink"],
+                     font=(FONT, 8, "bold"), padx=9, pady=4).pack(side="left", padx=(7, 0))
         tk.Frame(header, bg=COLORS["line"], height=1).pack(side="left", fill="x", expand=True, padx=(14, 0))
         return header
 
@@ -1114,7 +1210,7 @@ class MyCollectionPage(BasePage):
                  font=(FONT, 8), anchor="w").pack(fill="x")
         footer = tk.Frame(body, bg=COLORS["card"])
         footer.pack(fill="x", pady=(10, 0))
-        tk.Label(footer, text=money(row["estimated_value"]), bg=COLORS["card"], fg=COLORS["ink"],
+        tk.Label(footer, text=f"Paid {money(row['purchase_price'])}", bg=COLORS["card"], fg=COLORS["ink"],
                  font=(FONT, 10, "bold")).pack(side="left")
         edit = button(footer, "Edit", lambda item_id=int(row["id"]): self.edit_set(item_id), "soft")
         edit.configure(font=(FONT, 8, "bold"), padx=10, pady=5)
@@ -1411,7 +1507,7 @@ class DataPage(BasePage):
             ("Status", self.export_status_var, ("All", "Keeping", "For sale", "Parting out", "Sold")),
             ("Condition", self.export_condition_var, ("All", "Collection", "New", "Sealed", "Used", "Incomplete")),
             ("Built", self.export_built_var, ("All", "Built", "Not built")),
-            ("Sort", self.export_sort_var, ("Status then A-Z", "Theme A-Z", "Alphabetical A-Z", "Alphabetical Z-A", "Highest value", "Lowest value", "Newest added", "Oldest added")),
+            ("Sort", self.export_sort_var, ("Status then A-Z", "Theme A-Z", "Alphabetical A-Z", "Alphabetical Z-A", "Highest paid", "Lowest paid", "Highest value", "Lowest value", "Newest added", "Oldest added")),
         )
         for index, (label, variable, values) in enumerate(rows):
             row = tk.Frame(settings, bg=COLORS["card"])
