@@ -6,7 +6,15 @@ Everything stays on your own computer. No account, no cloud, nothing gets upload
 
 ## Just want to use it?
 
-**[Download BrickLedger.exe](https://github.com/HaydenLongerich/LegoCollection/releases/latest/download/BrickLedger.exe)** and double click it. That's it, you don't need Python or anything else.
+<p align="center">
+  <a href="https://github.com/HaydenLongerich/LegoCollection/releases/download/v1.0.0/BrickLedger.exe">
+    <img src="assets/download-button.png" alt="Download BrickLedger.exe" width="460">
+  </a>
+</p>
+
+Hit the button, double click the exe, done. You don't need Python or anything else.
+
+Heads up, this is still a **beta**. It works fine for me but there might be some bugs, so back up your data now and then. If something breaks let me know in [issues](https://github.com/HaydenLongerich/LegoCollection/issues). Older and newer versions are on the [releases page](https://github.com/HaydenLongerich/LegoCollection/releases).
 
 Couple things:
 
@@ -46,7 +54,7 @@ When you run it this way your data goes in the `data` folder inside the repo ins
 .\tools\build_exe.ps1 -Release
 ```
 
-That spits out a standalone `dist\BrickLedger.exe` (the one that goes on the releases page).
+That spits out a standalone `dist\BrickLedger.exe` (the one that goes on the releases page). For a new version, bump the tag in the download link above and the text in `tools\make_download_button.py`, then run that script to redraw the button.
 
 Running it without `-Release` makes a `BrickLedger.exe` in the main folder that just runs whatever code is sitting next to it. That's what I use day to day since it picks up changes without rebuilding. It only needs a rebuild if the tests say a new import is missing, or if the logo or `tools\launcher.py` changes.
 
